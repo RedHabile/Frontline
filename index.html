@@ -1274,56 +1274,97 @@ h2 { font-size: 34px; }
 
   Sim.prototype._processAttack = function (a) {
     var o = this.players[a.owner];
-    if (!o.alive) { a.active = false; return; }
+    if (!o || !o.alive) { a.active = false; return; }
     var tgt = a.target ? this.players[a.target] : null;
     if (tgt && !tgt.alive) { this.finish(a, 'done'); return; }
-    var q;
-    // les cases voisines découvertes au tour précédent deviennent conquérables : le front avance d'une case par tour
-    for (q = 0; q < a.pend.length; q++) { a.heap.push(this._pri(a.pend[q], a, false), a.pend[q]); a.heap2.push(this._pri(a.pend[q], a, true), a.pend[q]); }
-    a.pend.length = 0;
-    // La vitesse dépend de la force engagée et du rapport de troupes : une armée largement supérieure progresse nettement plus vite.
-    var defenderForce = tgt ? Math.max(1, tgt.troops) : 0;
-    var forceRatio = tgt ? a.troops / defenderForce : 2.5;
-    var ratioSpeed = tgt ? Math.max(0.62, Math.min(2.15, Math.sqrt(Math.max(0.1, forceRatio)))) : 1.35;
-    var troopSpeed = Math.pow(Math.max(0, a.troops), 0.54) / 10.5;
-    a.acc += Math.min(P.speedCap, Math.max(0.35, troopSpeed * ratioSpeed)); 
-    var budget = Math.floor(a.acc); a.acc -= budget;
-    while (budget-- > 0) {
-      // une part des conquêtes de chaque tour va vers le point visé, le reste avance de façon circulaire
-      var useF = a.fx >= 0 && this.rng() < P.focusShare, t = (useF ? a.heap2 : a.heap).pop();
-      if (t < 0) t = (useF ? a.heap : a.heap2).pop();
-      if (t < 0) { if (a.pend.length) break; this.finish(a, 'done'); return; }
-      if (this.owner[t] !== a.target) continue;
-      if (this._friendly(t, a.owner) === 0) { a.seen.delete(t); continue; }
-      var mag = MAG[this.terrain[t]], atkLoss, defLoss = 0;
+
+    // Full contact front: every defender tile touching the attacker is eligible.
+    var front = [];
+    var marked = new Set();
+    var owner = this.owner, terrain = this.terrain;
+    o.border.forEach(function (b) {
+      var x = b % W, y = (b / W) | 0, n;
+      if (x > 0) { n = b - 1; if (terrain[n] > 0 && owner[n] === a.target && !marked.has(n)) { marked.add(n); front.push(n); } }
+      if (x < W - 1) { n = b + 1; if (terrain[n] > 0 && owner[n] === a.target && !marked.has(n)) { marked.add(n); front.push(n); } }
+      if (y > 0) { n = b - W; if (terrain[n] > 0 && owner[n] === a.target && !marked.has(n)) { marked.add(n); front.push(n); } }
+      if (y < H - 1) { n = b + W; if (terrain[n] > 0 && owner[n] === a.target && !marked.has(n)) { marked.add(n); front.push(n); } }
+    });
+
+    if (!front.length) { this.finish(a, a.gained === 0 ? 'weak' : 'done'); return; }
+    front.sort(function (aa, bb) { return aa - bb; });
+    if (a.frontCursor === undefined) a.frontCursor = 0;
+    a.frontCursor = a.frontCursor % front.length;
+
+    // Much stronger troop advantage = much faster visual advance.
+    var defenderForce = tgt ? Math.max(1, tgt.troops) : 1;
+    var ratio = tgt ? a.troops / defenderForce : 3.0;
+    var ratioBoost = Math.pow(Math.max(0.15, ratio), 0.72);
+    var stackBoost = Math.pow(Math.max(0.25, a.troops / 1800), 0.22);
+    var speed = 0.75 + 1.15 * ratioBoost * stackBoost;
+    speed = Math.max(0.55, Math.min(P.speedCap, speed));
+    a.acc = (a.acc || 0) + speed;
+    var budget = Math.floor(a.acc);
+    a.acc -= budget;
+
+    while (budget-- > 0 && front.length) {
+      if (a.frontCursor >= front.length) a.frontCursor %= front.length;
+      // Spread the captures around the whole current front instead of following one path.
+      var stride = Math.max(1, Math.floor(front.length / Math.max(1, Math.min(8, budget + 1))));
+      var idx = (a.frontCursor + stride) % front.length;
+      var t = front[idx];
+      a.frontCursor = (idx + Math.max(1, stride)) % Math.max(1, front.length);
+
+      if (owner[t] !== a.target || terrain[t] <= 0 || this._friendly(t, a.owner) === 0) {
+        front.splice(idx, 1);
+        continue;
+      }
+
+      var mag = MAG[terrain[t]], atkLoss, defLoss = 0;
       if (tgt) {
         var dens = tgt.troops / Math.max(1, tgt.tiles);
-        // La supériorité numérique réduit le coût par pixel, sans rendre la conquête gratuite.
         var localRatio = tgt.troops / Math.max(1, a.troops);
-        var lossRatio = Math.max(0.58, Math.min(1.8, localRatio));
-        atkLoss = dens * mag * P.defMul * lossRatio + P.defBase * Math.max(0.65, Math.min(1.5, localRatio));
+        var lossRatio = Math.max(0.42, Math.min(1.65, localRatio));
+        atkLoss = dens * mag * P.defMul * lossRatio + P.defBase * Math.max(0.52, Math.min(1.35, localRatio));
         defLoss = dens * P.defLoss;
         if (tgt.defs.length) {
           var tx = t % W, ty = (t / W) | 0, R2 = P.defRadius * P.defRadius;
           for (var di = 0; di < tgt.defs.length; di++) {
             var ddx = (tgt.defs[di] % W) - tx, ddy = ((tgt.defs[di] / W) | 0) - ty;
-            if (ddx * ddx + ddy * ddy <= R2) { var dl = 1 + 0.25 * tl(tgt, 'dDef'); atkLoss *= 1 + (P.defAtk - 1) * dl; defLoss *= Math.max(0.15, P.defDef / dl); break; }
+            if (ddx * ddx + ddy * ddy <= R2) {
+              var dl = 1 + 0.25 * tl(tgt, 'dDef');
+              atkLoss *= 1 + (P.defAtk - 1) * dl;
+              defLoss *= Math.max(0.15, P.defDef / dl);
+              break;
+            }
           }
         }
-      } else atkLoss = P.neutralCost * mag;
+      } else {
+        atkLoss = P.neutralCost * mag;
+      }
+
       if (a.troops < atkLoss) { this.finish(a, a.gained === 0 ? 'weak' : 'done'); return; }
       a.troops -= atkLoss;
       if (tgt) tgt.troops = Math.max(0, tgt.troops - defLoss);
       this.setOwner(t, a.owner);
       a.gained++;
-      var x = t % W, y = (t / W) | 0, ns = this.nb, cnt = 0;
-      if (a.cx < 0) { a.cx = x; a.cy = y; } else { a.cx += (x - a.cx) * 0.12; a.cy += (y - a.cy) * 0.12; }
-      if (x > 0) ns[cnt++] = t - 1; if (x < W - 1) ns[cnt++] = t + 1; if (y > 0) ns[cnt++] = t - W; if (y < H - 1) ns[cnt++] = t + W;
-      for (var j = 0; j < cnt; j++) {
-        var n = ns[j];
-        if (this.owner[n] === a.target && this.terrain[n] > 0 && !a.seen.has(n)) { a.seen.add(n); if (a.org) { var og = a.org.get(t); if (og !== undefined) a.org.set(n, og); } a.pend.push(n); }
-      }
+
+      var x = t % W, y = (t / W) | 0;
+      if (a.cx < 0) { a.cx = x; a.cy = y; }
+      else { a.cx += (x - a.cx) * 0.12; a.cy += (y - a.cy) * 0.12; }
+
       if (tgt && tgt.tiles === 0) { this.eliminate(tgt, o); this.finish(a, 'done'); return; }
+
+      // Rebuild the full front after each captured pixel so the advance stays broad.
+      front = [];
+      marked = new Set();
+      o.border.forEach(function (b) {
+        var bx = b % W, by = (b / W) | 0, nn;
+        if (bx > 0) { nn = b - 1; if (terrain[nn] > 0 && owner[nn] === a.target && !marked.has(nn)) { marked.add(nn); front.push(nn); } }
+        if (bx < W - 1) { nn = b + 1; if (terrain[nn] > 0 && owner[nn] === a.target && !marked.has(nn)) { marked.add(nn); front.push(nn); } }
+        if (by > 0) { nn = b - W; if (terrain[nn] > 0 && owner[nn] === a.target && !marked.has(nn)) { marked.add(nn); front.push(nn); } }
+        if (by < H - 1) { nn = b + W; if (terrain[nn] > 0 && owner[nn] === a.target && !marked.has(nn)) { marked.add(nn); front.push(nn); } }
+      });
+      if (!front.length) { this.finish(a, 'done'); return; }
     }
   };
 
