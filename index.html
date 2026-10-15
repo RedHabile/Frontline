@@ -2369,6 +2369,7 @@ h2 { font-size: 34px; }
     sim.randomHumanSpawn();
     st.phase = 'spawn';
     lfJournal = []; lfJournalSeen = 0; lfAddJournal('Nouvelle partie lancée.'); lfJournalBox.style.display = 'none';
+    lfShowTutorial();
     $('end').hidden = true; $('toasts').textContent = '';
     showPhaseUi();
     var h = sim.human; focusOn(h.spawnX, h.spawnY, Math.max(minZ * 2.4, 5));
@@ -2614,6 +2615,55 @@ h2 { font-size: 34px; }
     $('end').hidden = false;
   }
 
+
+
+  /* ---------- Tutoriel et succès ---------- */
+  var lfTutorialStep = 0;
+  var lfTutorial = document.createElement('div');
+  lfTutorial.id = 'lfTutorial';
+  lfTutorial.style.cssText = 'position:fixed;inset:0;z-index:1000;background:#07111dcc;display:none;align-items:center;justify-content:center;padding:18px;color:#eef5fa';
+  lfTutorial.innerHTML = '<div style="width:min(440px,100%);background:#101e2b;border:1px solid #ffffff24;border-radius:12px;padding:20px;box-shadow:0 12px 45px #0009"><div style="color:#86d9ff;font-size:11px;letter-spacing:2px;text-transform:uppercase">Guide du joueur</div><h2 id="lfTutTitle" style="margin:8px 0"></h2><p id="lfTutText" style="line-height:1.5;color:#c6d3df"></p><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px"><button id="lfTutSkip" type="button" style="padding:9px 12px;background:#263746;border:0;border-radius:6px;color:white">Passer</button><button id="lfTutNext" type="button" style="padding:9px 14px;background:#5eb9e8;border:0;border-radius:6px;color:#07111d;font-weight:bold">Suivant →</button></div></div>';
+  document.body.appendChild(lfTutorial);
+  var lfTutSteps = [
+    ['1. Choisir un point de départ','Au début, touchez une zone de terre libre pour installer votre pays. Évitez les frontières trop proches des autres nations.'],
+    ['2. Étendre votre territoire','Touchez votre territoire ou une cible pour ouvrir le menu radial. Choisissez une action et surveillez vos troupes avant d’attaquer.'],
+    ['3. Développer votre économie','Les bases et les usines soutiennent votre croissance. Gardez de l’or pour construire et améliorer vos capacités.'],
+    ['4. Observer et négocier','Le classement montre les nations les plus puissantes. Le bouton ☷ ouvre le journal pour retrouver les attaques et événements récents.'],
+    ['5. Adapter votre stratégie','Vous pouvez mettre la partie en pause, accélérer le temps et ouvrir les panneaux de diplomatie ou de recherche. Bonne partie !']
+  ];
+  function lfShowTutStep() {
+    document.getElementById('lfTutTitle').textContent = lfTutSteps[lfTutorialStep][0];
+    document.getElementById('lfTutText').textContent = lfTutSteps[lfTutorialStep][1];
+    document.getElementById('lfTutNext').textContent = lfTutorialStep === lfTutSteps.length - 1 ? 'Terminer ✓' : 'Suivant →';
+  }
+  function lfCloseTutorial() {
+    lfTutorial.style.display = 'none';
+    save('lf.tutorial.seen','1');
+  }
+  document.getElementById('lfTutNext').addEventListener('click', function () {
+    if (lfTutorialStep >= lfTutSteps.length - 1) { lfCloseTutorial(); return; }
+    lfTutorialStep++; lfShowTutStep();
+  });
+  document.getElementById('lfTutSkip').addEventListener('click', lfCloseTutorial);
+  function lfShowTutorial() {
+    if (load('lf.tutorial.seen','0') === '1') return;
+    lfTutorialStep = 0; lfShowTutStep(); lfTutorial.style.display = 'flex';
+  }
+  function lfUnlockAchievement(id, title, description) {
+    var unlocked = [];
+    try { unlocked = JSON.parse(load('lf.achievements','[]')); } catch (e) { unlocked = []; }
+    if (unlocked.indexOf(id) >= 0) return;
+    unlocked.push(id); save('lf.achievements', JSON.stringify(unlocked));
+    toast('Succès débloqué : ' + title + ' — ' + description);
+    lfAddJournal('Succès débloqué : ' + title + '.');
+  }
+  function lfCheckAchievements(sim) {
+    if (!sim || !sim.human) return;
+    if (sim.human.tiles >= sim.landCount * 0.1) lfUnlockAchievement('ten-percent','Expansion','Contrôler 10 % des terres.');
+    if (sim.tick >= 6000 && sim.human.alive) lfUnlockAchievement('survivor-10','Résistant','Survivre dix minutes de jeu.');
+    if (sim.over && sim.over.type === 'win') lfUnlockAchievement('winner','Conquérant','Remporter une partie.');
+  }
+  var lfAchTick = 0;
 
   /* ---------- Journal d'événements Frontline ---------- */
   var lfJournal = [];
@@ -3157,6 +3207,7 @@ h2 { font-size: 34px; }
     if (sim && sim.track && sim.changed.length) { Pt.paintChanged(sim, st.bg, px); dirty = true; }
     if (dirty) { flush(); dirty = false; }
     handleEvents(ts); checkOffers();
+    if (sim && sim.tick - lfAchTick >= 20) { lfAchTick = sim.tick; lfCheckAchievements(sim); }
     if (sim && sim.over && !st.overDone && st.phase === 'play') { st.overDone = true; showEnd(); }
     var pan = 520 * dt / 1000 / cam.z;
     if (keys.arrowleft || keys.a) { cam.x -= pan; st.focus = null; }
