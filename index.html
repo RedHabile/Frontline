@@ -3253,7 +3253,7 @@ h2 { font-size: 34px; }
   /* ---------- Connexion aux salons privés multijoueurs ---------- */
   var lfSocket = null, lfRoomCode = '', lfPlayerId = '', lfRoomHost = false, lfRoomPlayers = [];
   var lfServerInput = $('lfServerUrl'), lfRoomStatus = $('lfRoomStatus'), lfRoomDetails = $('lfRoomDetails');
-  lfServerInput.value = load('lf.serverUrl','https://frontline-5kt1.onrender.com/');
+  lfServerInput.value = load('lf.serverUrl','') || 'https://frontline-5kt1.onrender.com/';
   function lfSetRoomStatus(message, bad) {
     lfRoomStatus.textContent = message;
     lfRoomStatus.style.color = bad ? '#ff9a91' : '';
