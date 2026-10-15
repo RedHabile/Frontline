@@ -2368,6 +2368,7 @@ h2 { font-size: 34px; }
     Pt.paintAll(sim, st.bg, px); sim.changed.length = 0; flush();
     sim.randomHumanSpawn();
     st.phase = 'spawn';
+    lfJournal = []; lfJournalSeen = 0; lfAddJournal('Nouvelle partie lancée.'); lfJournalBox.style.display = 'none';
     $('end').hidden = true; $('toasts').textContent = '';
     showPhaseUi();
     var h = sim.human; focusOn(h.spawnX, h.spawnY, Math.max(minZ * 2.4, 5));
@@ -2537,6 +2538,17 @@ h2 { font-size: 34px; }
     var sim = st.sim; if (!sim || !sim.events.length) return;
     var h = sim.human, ev = sim.events, pl = sim.players;
     function throttle(key, ms) { if (lastWarn[key] && ts - lastWarn[key] < ms) return false; lastWarn[key] = ts; return true; }
+    for (var k = lfJournalSeen; k < ev.length; k++) {
+      var je = ev[k], jmsg = '';
+      if (je.type === 'incoming' && h && je.target === h.id && pl[je.by]) jmsg = pl[je.by].name + ' vous attaque.';
+      else if (je.type === 'eliminated' && pl[je.id]) jmsg = pl[je.id].name + ' est éliminé' + (je.by && pl[je.by] ? ' par ' + pl[je.by].name : '') + '.';
+      else if (je.type === 'bomb' && pl[je.owner]) jmsg = pl[je.owner].name + ' lance ' + (BOMBNAME[je.kind] || 'une bombe') + '.';
+      else if (je.type === 'boat' && h && je.target === h.id && pl[je.owner]) jmsg = pl[je.owner].name + ' débarque sur votre territoire.';
+      else if (je.type === 'razed' && h && je.target === h.id) jmsg = 'Un bâtiment (' + (BNAME[je.what] || je.what) + ') est détruit sur votre territoire.';
+      else if (je.type === 'intercepted' && pl[je.owner]) jmsg = 'Une attaque de ' + pl[je.owner].name + ' a été interceptée.';
+      if (jmsg) lfAddJournal(jmsg, je.type === 'incoming' || (je.type === 'bomb' && h && je.target === h.id));
+    }
+    lfJournalSeen = ev.length;
     for (var k = 0; k < ev.length; k++) {
       var e = ev[k];
       if (e.type === 'incoming' && h && e.target === h.id && h.alive) {
@@ -2592,9 +2604,47 @@ h2 { font-size: 34px; }
     $('eD').textContent = clock(sim.tick);
     $('eP').textContent = pct1(h.peak / sim.landCount * 100);
     $('eR').textContent = (h.alive ? ranked.indexOf(h) + 1 : ranked.length) + '/' + ranked.length;
+    var totalElims = 0;
+    sim.players.forEach(function (p) { if (p && p.spawned && !p.alive) totalElims++; });
+    var topThree = ranked.slice(0, 3).map(function (p, idx) {
+      return (idx + 1) + '. ' + p.name + ' — ' + pct1(p.tiles / sim.landCount * 100);
+    }).join('  |  ');
+    $('eS').textContent += ' Éliminations : ' + totalElims + '. Classement : ' + (topThree || 'aucun territoire') + '.';
     $('bWatch').hidden = !o.eliminated;
     $('end').hidden = false;
   }
+
+
+  /* ---------- Journal d'événements Frontline ---------- */
+  var lfJournal = [];
+  var lfJournalSeen = 0;
+  var lfJournalBox = document.createElement('section');
+  lfJournalBox.id = 'lfJournalBox';
+  lfJournalBox.style.cssText = 'position:absolute;right:62px;top:12px;width:min(320px,calc(100vw - 90px));max-height:45vh;overflow:auto;z-index:20;padding:10px;background:rgba(11,21,31,.96);border:1px solid rgba(255,255,255,.18);border-radius:6px;color:#e8eef3;display:none;box-shadow:0 8px 28px #0008';
+  lfJournalBox.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px"><b>Journal des événements</b><button id="lfJournalClose" type="button" style="background:#162838;border:1px solid #ffffff22;border-radius:4px;padding:4px 8px">Fermer</button></div><ol id="lfJournalList" style="padding-left:22px;margin:0;display:grid;gap:6px;font-size:12px"></ol><p id="lfJournalEmpty" style="color:#8ea3b4;margin:8px 0 0">Les événements apparaîtront ici pendant la partie.</p>';
+  document.body.appendChild(lfJournalBox);
+  var lfJournalBtn = document.createElement('button');
+  lfJournalBtn.type = 'button'; lfJournalBtn.textContent = '☷';
+  lfJournalBtn.title = 'Ouvrir le journal'; lfJournalBtn.setAttribute('aria-label','Ouvrir le journal des événements');
+  lfJournalBtn.style.cssText = 'position:absolute;right:16px;top:192px;z-index:19;width:38px;height:38px;background:rgba(11,21,31,.92);border:1px solid #ffffff22;border-radius:6px;color:#e8eef3;font-size:19px;cursor:pointer';
+  document.body.appendChild(lfJournalBtn);
+  function lfAddJournal(message, danger) {
+    lfJournal.unshift({ time: st.sim ? clock(st.sim.tick) : '—', message: message, danger: !!danger });
+    if (lfJournal.length > 60) lfJournal.length = 60;
+    var list = document.getElementById('lfJournalList'); if (!list) return;
+    list.textContent = '';
+    lfJournal.forEach(function (item) {
+      var li = document.createElement('li');
+      li.style.color = item.danger ? '#ff8f84' : '#e8eef3';
+      li.textContent = '[' + item.time + '] ' + item.message;
+      list.appendChild(li);
+    });
+    document.getElementById('lfJournalEmpty').hidden = lfJournal.length > 0;
+  }
+  lfJournalBtn.addEventListener('click', function () {
+    lfJournalBox.style.display = lfJournalBox.style.display === 'none' ? 'block' : 'none';
+  });
+  document.getElementById('lfJournalClose').addEventListener('click', function () { lfJournalBox.style.display = 'none'; });
 
   /* ---------- HUD ---------- */
   function updateHud() {
