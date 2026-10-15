@@ -1208,7 +1208,7 @@ h2 { font-size: 34px; }
     var path = this._seaPath(pid, landing);
     if (!path) return { ok: false, reason: 'sea' };
     p.troops -= troops;
-    var boat = { id: this.nextBid++, owner: pid, troops: troops, path: path, pos: 0, landTile: landing, x: (path[0] % W) + 0.5, y: ((path[0] / W) | 0) + 0.5 };
+    var boat = { id: this.nextBid++, owner: pid, troops: troops, path: path, pos: 0, landTile: landing, targetTile: tile, x: (path[0] % W) + 0.5, y: ((path[0] / W) | 0) + 0.5 };
     this.boats.push(boat);
     this.events.push({ type: 'boat', owner: pid, target: this.owner[landing] });
     return { ok: true, boat: boat };
@@ -1229,7 +1229,7 @@ h2 { font-size: 34px; }
     if (tgt && tgt.tiles === 0) this.eliminate(tgt, p);
     p.troops += b.troops;
     this.events.push({ type: 'landed', owner: b.owner, target: o, x: t % W, y: (t / W) | 0 });
-    this.launch(b.owner, (tgt && tgt.alive) ? o : 0, b.troops, t);
+    this.launch(b.owner, (tgt && tgt.alive) ? o : 0, b.troops, Number.isInteger(b.targetTile) ? b.targetTile : t);
   };
   Sim.prototype._stepBoats = function () {
     for (var i = this.boats.length - 1; i >= 0; i--) {
