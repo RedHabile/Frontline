@@ -1,4 +1,11 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html>
+<html>
+<head>
+<meta charset=utf8>
+<meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style>
+</head>
+<body>
 <title>Ligne de Front</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -536,7 +543,7 @@ h2 { font-size: 34px; }
     shipCost: 700, shipGrow: 0.3, shipHp: 40, shipSpeed: 0.45, shipRange: 8, shipDmg: 0.35, shipShot: 35,
     bhp: { city: 8, factory: 6, port: 8, def: 6, silo: 10, sam: 6, airport: 8 },
     raidCost: 250, raidDmg: 5, raidSpeed: 1.6, raidRange: 130, raidSam: 0.45, vGold: 1, vTroop: 0.15, vTile: 5, winShare: 0.8,
-    boatSpeed: 0.8, maxBoats: 3, focusDist: 0.5, fillW: 1.7, focusShare: 0,
+    boatSpeed: 0.8, maxBoats: 3, focusDist: 0.5, fillW: 1.7, focusShare: 0.32,
     growMul: 2.0, growRoom: 0.0012, botGrow: 0.55, circFill: 0.8, circNoise: 0.06
   };
   /* Profils de difficulté des bots : grow = multiplicateur de troupes, think = délai de réflexion,
@@ -1244,7 +1251,12 @@ h2 { font-size: 34px; }
     // les cases voisines découvertes au tour précédent deviennent conquérables : le front avance d'une case par tour
     for (q = 0; q < a.pend.length; q++) { a.heap.push(this._pri(a.pend[q], a, false), a.pend[q]); a.heap2.push(this._pri(a.pend[q], a, true), a.pend[q]); }
     a.pend.length = 0;
-    a.acc += Math.min(P.speedCap, Math.max(0.35, Math.sqrt(a.troops) / P.speedDiv));
+    // La vitesse dépend de la force engagée et du rapport de troupes : une armée largement supérieure progresse nettement plus vite.
+    var defenderForce = tgt ? Math.max(1, tgt.troops) : 0;
+    var forceRatio = tgt ? a.troops / defenderForce : 2.5;
+    var ratioSpeed = tgt ? Math.max(0.62, Math.min(2.15, Math.sqrt(Math.max(0.1, forceRatio)))) : 1.35;
+    var troopSpeed = Math.pow(Math.max(0, a.troops), 0.54) / 10.5;
+    a.acc += Math.min(P.speedCap, Math.max(0.35, troopSpeed * ratioSpeed)); 
     var budget = Math.floor(a.acc); a.acc -= budget;
     while (budget-- > 0) {
       // une part des conquêtes de chaque tour va vers le point visé, le reste avance de façon circulaire
@@ -1256,7 +1268,11 @@ h2 { font-size: 34px; }
       var mag = MAG[this.terrain[t]], atkLoss, defLoss = 0;
       if (tgt) {
         var dens = tgt.troops / Math.max(1, tgt.tiles);
-        atkLoss = dens * mag * P.defMul + P.defBase; defLoss = dens * P.defLoss;
+        // La supériorité numérique réduit le coût par pixel, sans rendre la conquête gratuite.
+        var localRatio = tgt.troops / Math.max(1, a.troops);
+        var lossRatio = Math.max(0.58, Math.min(1.8, localRatio));
+        atkLoss = dens * mag * P.defMul * lossRatio + P.defBase * Math.max(0.65, Math.min(1.5, localRatio));
+        defLoss = dens * P.defLoss;
         if (tgt.defs.length) {
           var tx = t % W, ty = (t / W) | 0, R2 = P.defRadius * P.defRadius;
           for (var di = 0; di < tgt.defs.length; di++) {
