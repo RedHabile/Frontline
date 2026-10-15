@@ -1316,38 +1316,29 @@ h2 { font-size: 34px; }
     a.acc -= budget;
 
     while (budget-- > 0 && front.length) {
-      if (a.frontCursor === undefined) a.frontCursor = 0;
-      if (a.frontCursor >= front.length) a.frontCursor %= front.length;
-      var idx = a.frontCursor % front.length;
-      var t;
+      var idx = 0, t;
 
-      // Une capture sur quatre favorise le point visé. Les autres se répartissent
-      // sur toute la frontière pour garder plusieurs axes d'expansion, sans hasard excessif.
-      var focusTurn = a.fx >= 0 && (a.gained % 4 === 0);
+      // Open Front : répartit les captures sur toute la frontière de contact.
+      // La frontière est reconstruite après chaque pixel, et le curseur tourne
+      // entre des zones éloignées au lieu de pousser un seul couloir.
+      var focusTurn = a.fx >= 0 && (a.gained % 8 === 0);
       if (focusTurn) {
-        var bestScore = Infinity;
+        var bestDist = Infinity;
         for (var fi2 = 0; fi2 < front.length; fi2++) {
           var candidate = front[fi2];
           var dxFocus = (candidate % W) - a.fx, dyFocus = ((candidate / W) | 0) - a.fy;
           var dist2 = dxFocus * dxFocus + dyFocus * dyFocus;
-          var links = this._friendly(candidate, a.owner);
-          var score = dist2 + (4 - links) * 2.5;
-          if (score < bestScore) { bestScore = score; idx = fi2; }
+          if (dist2 < bestDist) { bestDist = dist2; idx = fi2; }
         }
-        t = front[idx];
-        a.frontCursor = (idx + Math.max(1, Math.floor(front.length / 3))) % front.length;
       } else {
-        // Parcours tournant de la frontière : évite de capturer toujours le même couloir.
-        var scan = Math.min(7, front.length), bestLinks = -1, chosen = idx;
-        for (var si = 0; si < scan; si++) {
-          var ci = (idx + si * Math.max(1, Math.floor(front.length / scan))) % front.length;
-          var linksNow = this._friendly(front[ci], a.owner);
-          if (linksNow > bestLinks) { bestLinks = linksNow; chosen = ci; }
-        }
-        idx = chosen;
-        t = front[idx];
-        a.frontCursor = (idx + Math.max(1, Math.floor(front.length / scan))) % front.length;
+        // 12 secteurs répartis de la première à la dernière zone du front.
+        // Le secteur change à chaque pixel : l'expansion se fait partout.
+        var sectors = Math.min(12, front.length);
+        var sector = (a.frontCursor || 0) % sectors;
+        idx = Math.min(front.length - 1, Math.floor((sector + 0.5) * front.length / sectors));
+        a.frontCursor = sector + 1;
       }
+      t = front[idx];
 
       if (owner[t] !== a.target || terrain[t] <= 0 || this._friendly(t, a.owner) === 0) {
         front.splice(idx, 1);
