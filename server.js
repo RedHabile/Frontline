@@ -99,6 +99,16 @@ wss.on('connection', (ws) => {
         if (!ws.isHost) return send(ws, { type: 'error', message: 'Seul l’hôte peut envoyer l’état de la partie.' });
       }
       const payload = { ...msg, from: ws.playerId };
+
+      // Le client non-hôte peut avoir une horloge légèrement plus rapide que celle
+      // de l'hôte (différences de requestAnimationFrame entre appareils). On lui
+      // applique une micro-correction de cadence, invisible à l'écran, afin d'éviter
+      // que son monde ne prenne de l'avance entre deux synchronisations.
+      if (msg.type === 'sync' && ws.isHost === false) {
+        const baseSpeed = Number.isFinite(msg.speed) && msg.speed > 0 ? msg.speed : 1;
+        payload.speed = baseSpeed * 0.9975;
+      }
+
       broadcast(room, payload, ws);
       return;
     }
