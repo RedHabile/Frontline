@@ -545,8 +545,8 @@ h2 { font-size: 34px; }
     subCost: 1450, subHp: 24, subSpeed: 0.58, subRange: 6, subDmg: 1.05, subShot: 22,
     bhp: { city: 8, factory: 6, port: 8, def: 6, silo: 10, sam: 6, airport: 8 },
     raidCost: 250, raidDmg: 5, raidSpeed: 1.6, raidRange: 130, raidSam: 0.45, vGold: 1, vTroop: 0.15, vTile: 5, winShare: 0.8,
-    boatSpeed: 0.8, maxBoats: 3, focusDist: 1.65, fillW: 0.95, focusShare: 0.82,
-    growMul: 2.0, growRoom: 0.0012, botGrow: 0.55, circFill: 0.8, circNoise: 0.06
+    boatSpeed: 0.8, maxBoats: 3, focusDist: 2.7, fillW: 1.35, focusShare: 0.88,
+    growMul: 2.0, growRoom: 0.0012, botGrow: 0.55, circFill: 0.8, circNoise: 0.025
   };
   /* Profils de difficulté des bots : grow = multiplicateur de troupes, think = délai de réflexion,
      aggr = [min,max], inc = revenu, bld = fréquence de construction, nuke = fréquence des bombes */
@@ -760,12 +760,18 @@ h2 { font-size: 34px; }
         return Math.sqrt(ox * ox + oy * oy) + (4 - this._friendly(i, a.owner)) * P.circFill + this.rng() * P.circNoise;
       }
     }
-    var pri = (4 - this._friendly(i, a.owner)) * P.fillW + this.rng() * 0.18;
+    // Expansion en front continu : priorité à la case la plus proche du point visé,
+    // puis aux cases qui prolongent une frontière déjà large. Le bruit reste faible
+    // pour éviter les pixels qui partent au hasard ou les trous dans le front.
+    var friends = this._friendly(i, a.owner);
+    var pri = (4 - friends) * P.fillW + this.rng() * 0.035;
     if (a.fx >= 0) {
       var dx = (i % W) - a.fx, dy = ((i / W) | 0) - a.fy;
       var dist = Math.sqrt(dx * dx + dy * dy);
-      pri += dist * P.focusDist * (withFocus ? 1 : 0.72);
-      if (withFocus && dist < 4) pri -= (4 - dist) * 1.25;
+      pri += dist * P.focusDist * (withFocus ? 1 : 0.78);
+      if (withFocus && dist < 5) pri -= (5 - dist) * 1.55;
+      // À distance égale, la case la mieux reliée au territoire gagne.
+      pri -= friends * 0.22;
     }
     return pri;
   };
