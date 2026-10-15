@@ -3305,7 +3305,25 @@ h2 { font-size: 34px; }
       } else if (msg.type === 'host-left') {
         lfSetRoomStatus('L’hôte a quitté le salon.', true); lfDisconnectRoom(true);
       } else if (msg.type === 'game-start') {
-        lfSetRoomStatus('Le salon a lancé le départ. La synchronisation du moteur de jeu reste à connecter.', true);
+        // Tous les clients créent la partie avec les mêmes paramètres envoyés par l'hôte.
+        // Le démarrage local est désormais relié au message du serveur.
+        var settings = msg.settings || {};
+        st.seed = Number.isSafeInteger(settings.seed) ? settings.seed : st.seed;
+        if (['normal', 'large', 'huge'].includes(settings.size)) st.size = settings.size;
+        if (Number.isInteger(settings.bots)) st.bots = Math.max(0, Math.min(20, settings.bots));
+        var sizeButtons = $('siz').children;
+        for (var si = 0; si < sizeButtons.length; si++) {
+          sizeButtons[si].setAttribute('aria-pressed', String(sizeButtons[si].dataset.z === st.size));
+        }
+        $('sizHint').textContent = ({ normal: 'Carte standard.', large: 'Environ 2 fois plus grande : davantage de continents et d’îles.', huge: 'Environ 4 fois plus grande : un vrai monde, parties longues.' })[st.size] || '';
+        startGame();
+        // Chaque joueur est placé puis la simulation démarre automatiquement.
+        if (st.sim && st.sim.human && st.sim.human.spawned) {
+          beginPlay();
+          lfSetRoomStatus('Partie lancée ! Le jeu est démarré sur cet appareil. La synchronisation des actions entre joueurs reste à terminer.', true);
+        } else {
+          lfSetRoomStatus('Le jeu a démarré, mais aucun emplacement de départ n’a été trouvé.', true);
+        }
       }
     });
     ws.addEventListener('error', function () {
