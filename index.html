@@ -3153,7 +3153,7 @@ h2 { font-size: 34px; }
   }
   function showOffer(of) {
     var sim = st.sim, h = sim.human, q = sim.players[of.from]; if (!q) return;
-    curOffer = of; hold('offer', true); closeRadial(); closeDip();
+    curOffer = of; closeRadial(); closeDip();
     $('oWho').textContent = q.name; $('oDot').style.background = 'rgb(' + q.color.join(',') + ')';
     if (of.kind === 'alliance') {
       $('oText').textContent = q.name + ' vous propose une alliance : plus d’attaques entre vous, et vous ne pouvez plus bombarder ses terres.';
@@ -3167,7 +3167,7 @@ h2 { font-size: 34px; }
     }
     $('offer').hidden = false;
   }
-  function closeOffer() { curOffer = null; $('offer').hidden = true; st.hl = null; hold('offer', false); }
+  function closeOffer() { curOffer = null; $('offer').hidden = true; st.hl = null; }
   function answer(accept) {
     if (!curOffer) return;
     var sim = st.sim, q = sim.players[curOffer.from], answeredOffer = curOffer, r = sim.answerOffer(curOffer.id, accept);
@@ -3178,7 +3178,6 @@ h2 { font-size: 34px; }
       else toast('Vous n’avez plus les ressources nécessaires.');
     }
     closeOffer();
-    if (lfSocket && lfRoomCode) setPaused(false, true);
     updateHud();
   }
   function checkOffers() {
@@ -3447,7 +3446,6 @@ h2 { font-size: 34px; }
       } else if (msg.type === 'diplomacy-offer' && msg.from !== lfPlayerId && msg.kind === 'alliance' && msg.targetNetId === lfPlayerId && st.sim && st.phase === 'play') {
         var proposer = lfFindNetPlayer(msg.from), localHuman = st.sim.human;
         if (proposer && localHuman && !localHuman.allies.has(proposer.id)) {
-          lfSendRoomMessage({ type: 'pause', paused: true, reason: 'alliance-received' });
           var already = st.sim.offers.some(function(of){ return of.kind === 'alliance' && of.from === proposer.id && of.to === localHuman.id; });
           if (!already) st.sim.offers.push({ id: st.sim.nextOfferId++, kind: 'alliance', from: proposer.id, to: localHuman.id });
           toast(proposer.name + ' vous propose une alliance.'); checkOffers();
