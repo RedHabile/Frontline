@@ -601,7 +601,7 @@ h2 { font-size: 34px; }
       var palette = [[242,177,60],[73,153,255],[239,83,80],[87,196,123],[177,110,240],[240,133,61]];
       for (var np = 0; np < this.netPlayers.length; np++) {
         var entry = this.netPlayers[np] || {};
-        var color = np === 0 && opts.human ? opts.human.color : palette[np % palette.length];
+        var color = palette[np % palette.length];
         var player = this.addPlayer(entry.name || ('Joueur ' + (np + 1)), color, false);
         player.netId = entry.id || '';
         if (player.netId === this.netLocalId) this.human = player;
