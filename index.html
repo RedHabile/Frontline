@@ -3334,12 +3334,14 @@ h2 { font-size: 34px; }
       } else if (msg.type === 'action' && msg.from !== lfPlayerId && msg.action && st.sim && st.phase === 'play') {
         lfApplyRemoteAction(msg);
       } else if (msg.type === 'game-start') {
-        // Tous les clients créent la partie avec les mêmes paramètres envoyés par l'hôte.
-        // Le démarrage local est désormais relié au message du serveur.
+        // L'état initial doit être strictement identique chez tous : paramètres ET ordre des joueurs.
         var settings = msg.settings || {};
-        st.seed = Number.isSafeInteger(settings.seed) ? settings.seed : st.seed;
+        if (Array.isArray(msg.players) && msg.players.length) lfRoomPlayers = msg.players.slice();
+        if (Number.isSafeInteger(settings.seed)) st.seed = settings.seed;
         if (['normal', 'large', 'huge'].includes(settings.size)) st.size = settings.size;
         if (Number.isInteger(settings.bots)) st.bots = Math.max(0, Math.min(20, settings.bots));
+        // Recrée aussi l'aperçu avec la graine commune avant de lancer la simulation.
+        loadMap();
         var sizeButtons = $('siz').children;
         for (var si = 0; si < sizeButtons.length; si++) {
           sizeButtons[si].setAttribute('aria-pressed', String(sizeButtons[si].dataset.z === st.size));
@@ -3395,7 +3397,7 @@ h2 { font-size: 34px; }
         if (!lfSocket || lfSocket.readyState !== WebSocket.OPEN) return lfSetRoomStatus('Connexion perdue.',true);
         if (lfRoomPlayers.length < 2) return lfSetRoomStatus('Il faut au moins deux joueurs.',true);
         lfSocket.send(JSON.stringify({type:'start',seed:st.seed,size:st.size,bots:Math.max(0,st.bots-lfRoomPlayers.length+1)}));
-        lfSetRoomStatus('Demande de lancement envoyée. Le moteur de jeu partagé doit encore être raccordé.',true);
+        lfSetRoomStatus('Lancement envoyé : tous les joueurs recevront la même carte et les mêmes paramètres.',false);
       });
       lfRoomDetails.appendChild(start);
     }
