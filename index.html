@@ -2369,6 +2369,7 @@ h2 { font-size: 34px; }
     sim.randomHumanSpawn();
     st.phase = 'spawn';
     lfJournal = []; lfJournalSeen = 0; lfAddJournal('Nouvelle partie lancée.'); lfJournalBox.style.display = 'none';
+    lfTerritoryHistory = []; lfHistoryTick = -1;
     lfShowTutorial();
     $('end').hidden = true; $('toasts').textContent = '';
     showPhaseUi();
@@ -2611,11 +2612,53 @@ h2 { font-size: 34px; }
       return (idx + 1) + '. ' + p.name + ' — ' + pct1(p.tiles / sim.landCount * 100);
     }).join('  |  ');
     $('eS').textContent += ' Éliminations : ' + totalElims + '. Classement : ' + (topThree || 'aucun territoire') + '.';
+    lfDrawTerritoryChart(sim);
     $('bWatch').hidden = !o.eliminated;
     $('end').hidden = false;
   }
 
 
+
+
+  /* ---------- Historique des territoires pour le bilan ---------- */
+  var lfTerritoryHistory = [];
+  var lfHistoryTick = -1;
+  var lfChart = document.createElement('canvas');
+  lfChart.id = 'lfTerritoryChart'; lfChart.width = 560; lfChart.height = 180;
+  lfChart.style.cssText = 'display:block;width:100%;height:auto;margin:12px 0;border-radius:6px;background:#0a1722;border:1px solid #ffffff18';
+  var lfChartHost = document.querySelector('#end .card');
+  if (lfChartHost) {
+    var lfChartTitle = document.createElement('h3');
+    lfChartTitle.textContent = 'Évolution du territoire';
+    lfChartTitle.style.cssText = 'font-size:14px;margin:16px 0 6px;color:#dbe8f2';
+    var lfButtons = lfChartHost.querySelector('.btns');
+    if (lfButtons) { lfChartHost.insertBefore(lfChartTitle,lfButtons); lfChartHost.insertBefore(lfChart,lfButtons); }
+  }
+  function lfRecordTerritories(sim) {
+    if (!sim || sim.tick === lfHistoryTick || sim.tick % 50 !== 0) return;
+    lfHistoryTick = sim.tick;
+    lfTerritoryHistory.push({ tick:sim.tick, values:sim.players.map(function(p){return p && p.spawned ? p.tiles : 0;}) });
+    if (lfTerritoryHistory.length > 240) lfTerritoryHistory.shift();
+  }
+  function lfDrawTerritoryChart(sim) {
+    var c = lfChart, g = c.getContext('2d'); if (!g || !sim) return;
+    var w=c.width,h=c.height,pad=30,maxTick=Math.max(1,sim.tick),maxVal=Math.max(1,sim.landCount);
+    g.clearRect(0,0,w,h); g.fillStyle='#0a1722'; g.fillRect(0,0,w,h);
+    g.strokeStyle='#ffffff18'; g.lineWidth=1;
+    for(var n=0;n<=4;n++){var y=pad+(h-pad*1.5)*n/4;g.beginPath();g.moveTo(pad,y);g.lineTo(w-8,y);g.stroke();}
+    g.fillStyle='#9fb2c2';g.font='10px sans-serif';g.fillText('0 %',4,h-pad);g.fillText('100 %',2,pad+3);
+    if(lfTerritoryHistory.length<2){g.fillText('Historique trop court pour tracer une courbe.',pad+8,h/2);return;}
+    sim.players.forEach(function(p,id){
+      if(!p||!p.spawned)return;
+      g.strokeStyle='rgb('+p.color.join(',')+')';g.lineWidth=p===sim.human?3:1.3;g.globalAlpha=p.alive?0.9:0.35;g.beginPath();
+      lfTerritoryHistory.forEach(function(row,idx){
+        var x=pad+(w-pad-10)*idx/Math.max(1,lfTerritoryHistory.length-1);
+        var y=h-pad-(h-pad*1.5)*(row.values[id]||0)/maxVal;
+        if(idx===0)g.moveTo(x,y);else g.lineTo(x,y);
+      });g.stroke();
+    });g.globalAlpha=1;
+    g.fillStyle='#9fb2c2';g.fillText('Début',pad,h-7);g.fillText(clock(sim.tick),w-55,h-7);
+  }
 
   /* ---------- Tutoriel et succès ---------- */
   var lfTutorialStep = 0;
@@ -3208,6 +3251,7 @@ h2 { font-size: 34px; }
     if (dirty) { flush(); dirty = false; }
     handleEvents(ts); checkOffers();
     if (sim && sim.tick - lfAchTick >= 20) { lfAchTick = sim.tick; lfCheckAchievements(sim); }
+    if (sim && st.phase === 'play') lfRecordTerritories(sim);
     if (sim && sim.over && !st.overDone && st.phase === 'play') { st.overDone = true; showEnd(); }
     var pan = 520 * dt / 1000 / cam.z;
     if (keys.arrowleft || keys.a) { cam.x -= pan; st.focus = null; }
