@@ -3340,7 +3340,7 @@ h2 { font-size: 34px; }
 
   /* ---------- Connexion aux salons privés multijoueurs ---------- */
   var lfSocket = null, lfRoomCode = '', lfPlayerId = '', lfRoomHost = false, lfRoomPlayers = [];
-  var lfHostTick = null, lfHostPaused = false, lfSyncSendAt = 0, lfPauseByVisibility = false, lfPauseWasActive = false;
+  var lfHostTick = null, lfHostPaused = false, lfSyncSendAt = 0, lfPauseByVisibility = false, lfPauseWasActive = false, lfLastHostSyncAt = 0;
   function lfSendRoomMessage(message) {
     if (!lfSocket || !lfRoomCode || lfSocket.readyState !== WebSocket.OPEN) return false;
     try { lfSocket.send(JSON.stringify(message)); return true; } catch (e) { return false; }
@@ -3404,6 +3404,7 @@ h2 { font-size: 34px; }
         lfSetRoomStatus('L’hôte a quitté le salon.', true); lfDisconnectRoom(true);
       } else if (msg.type === 'sync' && msg.from !== lfPlayerId && st.sim && st.phase === 'play') {
         lfHostTick = Number.isFinite(msg.tick) ? msg.tick : lfHostTick;
+        lfLastHostSyncAt = performance.now();
         lfHostPaused = !!msg.paused;
         if (st.paused !== lfHostPaused) setPaused(lfHostPaused, true);
         if (Number.isFinite(msg.speed) && msg.speed > 0) st.speed = msg.speed;
@@ -3519,21 +3520,26 @@ h2 { font-size: 34px; }
     var dt = Math.min(100, ts - last); last = ts;
     var sim = st.sim;
     if (sim && st.phase === 'play' && !st.paused && !sim.halted) {
-      // Les clients suivent l'horloge de l'hôte : rattrapage borné si l'onglet a été ralenti.
-      var lag = (!lfRoomHost && lfSocket && lfHostTick !== null) ? (lfHostTick - sim.tick) : 0;
-      if (!lfRoomHost && lfSocket && lfHostPaused) { acc = 0; }
+      // Simulation fixe, avec rattrapage progressif : on ne jette plus le temps accumulé
+      // quand un appareil rame, et les clients accélèrent temporairement pour rejoindre l'hôte.
+      var isRoomClient = !lfRoomHost && !!lfSocket && lfHostTick !== null;
+      var lag = isRoomClient ? (lfHostTick - sim.tick) : 0;
+      if (isRoomClient && lfHostPaused) { acc = 0; }
       else {
-        acc += dt * st.speed; var n = 0;
-        while (acc >= 100 && n < 8) { sim.step(); acc -= 100; n++; }
-        if (n === 8) acc = 0;
-        if (lag > 2) {
-          var catchUp = Math.min(12, Math.max(0, Math.floor(lag)));
+        acc += dt * st.speed;
+        var n = 0, maxSteps = isRoomClient && lag > 3 ? 28 : 12;
+        while (acc >= 100 && n < maxSteps) { sim.step(); acc -= 100; n++; }
+        if (isRoomClient && lag > 2) {
+          // Le nombre d'étapes dépend du retard réel, sans saut brutal de simulation.
+          var catchUp = Math.min(36, Math.max(0, Math.floor(lag) - n));
           for (var ci = 0; ci < catchUp; ci++) sim.step();
-          acc = 0;
-        } else if (lag < -2) { acc = Math.min(acc, 20); }
+          if (catchUp) acc = Math.min(acc, 99);
+        }
+        // En avance sur l'hôte : ralentir légèrement au lieu de laisser l'écart s'agrandir.
+        if (isRoomClient && lag < -2) acc = Math.min(acc, 30);
       }
     }
-    if (lfSocket && lfRoomCode && st.phase === 'play' && lfRoomHost && ts - lfSyncSendAt > 400) {
+    if (lfSocket && lfRoomCode && st.phase === 'play' && lfRoomHost && ts - lfSyncSendAt > 120) {
       lfSyncSendAt = ts;
       lfSendRoomMessage({ type: 'sync', tick: sim ? sim.tick : 0, paused: !!st.paused, speed: st.speed });
     }
