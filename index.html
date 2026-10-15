@@ -594,7 +594,21 @@ h2 { font-size: 34px; }
     this.bombs = []; this.boats = []; this.ships = []; this.planes = []; this.allyAt = {}; this.offers = []; this.nextOfferId = 1; this.nextOffer = 700;
     this._par = new Int32Array(N); this._q = new Int32Array(N);
     this.nb = new Int32Array(4);
-    if (opts.human) {
+    this.netPlayers = Array.isArray(opts.netPlayers) ? opts.netPlayers : null;
+    this.netLocalId = opts.netLocalId || '';
+    if (this.netPlayers && this.netPlayers.length) {
+      // Every client creates the same human slots in the same order.
+      var palette = [[242,177,60],[73,153,255],[239,83,80],[87,196,123],[177,110,240],[240,133,61]];
+      for (var np = 0; np < this.netPlayers.length; np++) {
+        var entry = this.netPlayers[np] || {};
+        var color = np === 0 && opts.human ? opts.human.color : palette[np % palette.length];
+        var player = this.addPlayer(entry.name || ('Joueur ' + (np + 1)), color, false);
+        player.netId = entry.id || '';
+        if (player.netId === this.netLocalId) this.human = player;
+        var spawnTile = this.pickSpawn();
+        if (spawnTile >= 0) this.claimSpawn(player, spawnTile);
+      }
+    } else if (opts.human) {
       this.human = this.addPlayer(opts.human.name, opts.human.color, false);
     }
     var nBots = opts.bots | 0, names = NAMES.slice();
@@ -2375,11 +2389,12 @@ h2 { font-size: 34px; }
   function startGame() {
     var name = ($('nm').value.trim() || 'Joueur').slice(0, 14);
     save('lf.name', $('nm').value.trim()); save('lf.bots', String(st.bots)); save('lf.diff', st.diff); save('lf.size', st.size); save('lf.col', String(st.col));
-    var sim = new S.Sim({ seed: st.seed, bots: st.bots, difficulty: st.diff, size: st.size, human: { name: name, color: COLORS[st.col] }, track: true });
+    var netPlayers = lfSocket && lfRoomCode && lfRoomPlayers.length > 1 ? lfRoomPlayers : null;
+    var sim = new S.Sim({ seed: st.seed, bots: st.bots, difficulty: st.diff, size: st.size, human: { name: name, color: COLORS[st.col] }, netPlayers: netPlayers, netLocalId: lfPlayerId, track: true });
     syncSize(); st.sim = sim; st.paused = false; st.speed = 1; st.overDone = false; st.spectator = false; st.wars = {}; st.hl = null; st.lasso = null; curOffer = null; tr = null; holds = {}; holding = false; closeRadial(); closeDip(); closeRes(); resSig = ''; $('bRes').textContent = 'Recherche'; $('offer').hidden = true; $('trade').hidden = true; $('lbar').hidden = true; fx.length = 0; pings.length = 0;
     $('bSpeed').textContent = '1×';
     Pt.paintAll(sim, st.bg, px); sim.changed.length = 0; flush();
-    sim.randomHumanSpawn();
+    if (!(netPlayers && sim.human && sim.human.spawned)) sim.randomHumanSpawn();
     st.phase = 'spawn';
     lfJournal = []; lfJournalSeen = 0; lfAddJournal('Nouvelle partie lancée.'); lfJournalBox.style.display = 'none';
     lfTerritoryHistory = []; lfHistoryTick = -1;
@@ -2450,22 +2465,26 @@ h2 { font-size: 34px; }
       toast(BOATMSG[bo.reason] || MSG.range); return;
     }
     if (!res.ok) toast(MSG[res.reason] || 'Attaque impossible.');
+    else lfBroadcastAction({ kind: 'attack', target: t, troops: troops });
   }
   function doBuild(k, t) {
     var sim = st.sim, h = sim.human, b = ITEM[k], res;
     if (b.kind === 'place') {
       res = sim.build(h.id, k, t);
       if (!res.ok) { toast(res.reason === 'tech' ? 'Recherche requise : ' + TBY[res.tech].name + '.' : (MSGB[res.reason] || MSGB.invalid)); return false; }
+      lfBroadcastAction({ kind: 'build', item: k, target: t });
       toast(BNAME[k] + ' construit' + (BNAME_F[k] ? 'e' : '') + '.'); return true;
     }
     if (b.kind === 'bomb') {
       res = sim.launchBomb(h.id, k, t);
       if (!res.ok) { toast(res.reason === 'tech' ? 'Recherche requise : ' + TBY[res.tech].name + '.' : (MSGB[res.reason] || 'Lancement impossible.')); return false; }
+      lfBroadcastAction({ kind: 'bomb', item: k, target: t });
       toast(k === 'mirv' ? 'MIRV lancé.' : 'Bombe lancée.'); return true;
     }
     if (b.kind === 'raid') {
       res = sim.launchRaid(h.id, t);
       if (!res.ok) { toast(res.reason === 'tech' ? 'Recherche requise : ' + TBY[res.tech].name + '.' : (MSGB[res.reason] || 'Raid impossible.')); return false; }
+      lfBroadcastAction({ kind: 'raid', target: t });
       toast('Raid aérien lancé.'); return true;
     }
     return false;
@@ -3304,6 +3323,8 @@ h2 { font-size: 34px; }
         lfRoomPlayers = msg.players || lfRoomPlayers; lfRenderRoom();
       } else if (msg.type === 'host-left') {
         lfSetRoomStatus('L’hôte a quitté le salon.', true); lfDisconnectRoom(true);
+      } else if (msg.type === 'action' && msg.from !== lfPlayerId && msg.action && st.sim && st.phase === 'play') {
+        lfApplyRemoteAction(msg);
       } else if (msg.type === 'game-start') {
         // Tous les clients créent la partie avec les mêmes paramètres envoyés par l'hôte.
         // Le démarrage local est désormais relié au message du serveur.
@@ -3320,7 +3341,7 @@ h2 { font-size: 34px; }
         // Chaque joueur est placé puis la simulation démarre automatiquement.
         if (st.sim && st.sim.human && st.sim.human.spawned) {
           beginPlay();
-          lfSetRoomStatus('Partie lancée ! Le jeu est démarré sur cet appareil. La synchronisation des actions entre joueurs reste à terminer.', true);
+          lfSetRoomStatus('Partie lancée ! Les pays et les principales actions sont synchronisés.');
         } else {
           lfSetRoomStatus('Le jeu a démarré, mais aucun emplacement de départ n’a été trouvé.', true);
         }
@@ -3333,6 +3354,25 @@ h2 { font-size: 34px; }
       if (lfSocket === ws) lfDisconnectRoom(true);
     });
   }
+  function lfBroadcastAction(action) {
+    if (!lfSocket || !lfRoomCode || !st.sim || !st.sim.human) return;
+    try { lfSocket.send(JSON.stringify({ type: 'action', action: action })); } catch (e) {}
+  }
+  function lfApplyRemoteAction(msg) {
+    var sim = st.sim, action = msg.action, player = null;
+    if (!action || !msg.from) return;
+    for (var i = 1; i < sim.players.length; i++) {
+      if (sim.players[i] && sim.players[i].netId === msg.from) { player = sim.players[i]; break; }
+    }
+    if (!player || !player.alive) return;
+    try {
+      if (action.kind === 'attack') sim.launch(player.id, sim.owner[action.target] || 0, Number(action.troops) || 0, action.target);
+      else if (action.kind === 'build') sim.build(player.id, action.item, action.target);
+      else if (action.kind === 'bomb') sim.launchBomb(player.id, action.item, action.target);
+      else if (action.kind === 'raid') sim.launchRaid(player.id, action.target);
+    } catch (e) { console.warn('Action réseau ignorée', e); }
+  }
+
   function lfRenderRoom() {
     lfRoomDetails.hidden = false;
     lfRoomDetails.textContent = '';
