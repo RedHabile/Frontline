@@ -343,6 +343,19 @@ h2 { font-size: 34px; }
       <span id="sizHint" class="muted" style="font-size:12px"></span>
     </div>
     <div class="field"><span class="lbl">Carte</span><div class="mapline"><span id="seedLbl" class="mono">n° 0</span><button id="bMap" type="button" class="ghost">Autre carte</button></div></div>
+    <div class="field" id="lfOnlinePanel" style="border:1px solid #ffffff20;border-radius:8px;padding:12px;background:#0a172244">
+      <span class="lbl">Multijoueur en ligne — salons privés</span>
+      <label for="lfServerUrl" style="display:block;font-size:12px;margin:6px 0 4px">Adresse du serveur</label>
+      <input id="lfServerUrl" type="url" autocomplete="url" placeholder="https://ton-serveur.onrender.com" style="width:100%;box-sizing:border-box">
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+        <button id="lfCreateRoom" type="button" class="ghost">Créer un salon</button>
+        <input id="lfRoomCodeInput" type="text" maxlength="6" placeholder="CODE" aria-label="Code du salon" style="width:88px;text-transform:uppercase">
+        <button id="lfJoinRoom" type="button" class="ghost">Rejoindre</button>
+      </div>
+      <p id="lfRoomStatus" class="muted" style="font-size:12px;margin:8px 0 4px">Le serveur doit être déployé avant de créer un salon.</p>
+      <div id="lfRoomDetails" hidden style="font-size:12px;margin-top:6px"></div>
+      <button id="lfLeaveRoom" type="button" class="ghost" hidden style="margin-top:8px">Quitter le salon</button>
+    </div>
     <button id="bPlay" type="button" class="primary wide">Jouer</button>
     <ul class="help">
       <li>Touchez ou cliquez une zone : le menu radial propose d’attaquer, de bâtir, de bombarder, de lancer un raid aérien ou de négocier.</li>
@@ -3235,6 +3248,95 @@ h2 { font-size: 34px; }
     markSeg();
     $('nm').value = load('lf.name', '');
   }
+
+
+  /* ---------- Connexion aux salons privés multijoueurs ---------- */
+  var lfSocket = null, lfRoomCode = '', lfPlayerId = '', lfRoomHost = false, lfRoomPlayers = [];
+  var lfServerInput = $('lfServerUrl'), lfRoomStatus = $('lfRoomStatus'), lfRoomDetails = $('lfRoomDetails');
+  lfServerInput.value = load('lf.serverUrl','');
+  function lfSetRoomStatus(message, bad) {
+    lfRoomStatus.textContent = message;
+    lfRoomStatus.style.color = bad ? '#ff9a91' : '';
+  }
+  function lfServerAddress() {
+    var raw = lfServerInput.value.trim();
+    if (!raw) throw new Error('Déploie le serveur puis colle son adresse dans le champ.');
+    var u;
+    try { u = new URL(raw); } catch (e) { throw new Error('Adresse du serveur invalide.'); }
+    if (u.protocol === 'https:') u.protocol = 'wss:';
+    else if (u.protocol === 'http:') u.protocol = 'ws:';
+    if (u.protocol !== 'wss:' && u.protocol !== 'ws:') throw new Error('Utilise une adresse HTTPS ou WSS.');
+    return u.href.replace(/\/$/, '');
+  }
+  function lfDisconnectRoom(quiet) {
+    if (lfSocket) { try { lfSocket.close(); } catch (e) {} }
+    lfSocket = null; lfRoomCode = ''; lfPlayerId = ''; lfRoomHost = false; lfRoomPlayers = [];
+    $('lfLeaveRoom').hidden = true; $('lfCreateRoom').disabled = false; $('lfJoinRoom').disabled = false;
+    lfRoomDetails.hidden = true; lfRoomDetails.textContent = '';
+    if (!quiet) lfSetRoomStatus('Déconnecté du salon.');
+  }
+  function lfConnectRoom(mode) {
+    if (lfSocket) { lfSetRoomStatus('Quitte d’abord le salon actuel.', true); return; }
+    var address;
+    try { address = lfServerAddress(); } catch (e) { lfSetRoomStatus(e.message, true); return; }
+    save('lf.serverUrl', lfServerInput.value.trim());
+    var name = ($('nm').value.trim() || 'Joueur').slice(0,14);
+    lfSetRoomStatus('Connexion au serveur…');
+    var ws;
+    try { ws = new WebSocket(address); } catch (e) { lfSetRoomStatus('Impossible de créer la connexion.', true); return; }
+    lfSocket = ws;
+    ws.addEventListener('open', function () {
+      if (lfSocket !== ws) return;
+      if (mode === 'create') ws.send(JSON.stringify({type:'create',name:name}));
+      else ws.send(JSON.stringify({type:'join',name:name,code:$('lfRoomCodeInput').value.trim().toUpperCase()}));
+    });
+    ws.addEventListener('message', function (event) {
+      if (lfSocket !== ws) return;
+      var msg; try { msg = JSON.parse(event.data); } catch (e) { return; }
+      if (msg.type === 'error') { lfSetRoomStatus(msg.message || 'Erreur du serveur.', true); lfDisconnectRoom(true); return; }
+      if (msg.type === 'room-created' || msg.type === 'room-joined') {
+        lfRoomCode = msg.code; lfPlayerId = msg.playerId; lfRoomHost = msg.type === 'room-created';
+        lfRoomPlayers = msg.players || []; $('lfLeaveRoom').hidden = false;
+        $('lfCreateRoom').disabled = true; $('lfJoinRoom').disabled = true;
+        lfSetRoomStatus(lfRoomHost ? 'Salon créé ! Partage ce code à tes amis.' : 'Tu as rejoint le salon.');
+        lfRenderRoom();
+      } else if (msg.type === 'player-joined' || msg.type === 'player-left') {
+        lfRoomPlayers = msg.players || lfRoomPlayers; lfRenderRoom();
+      } else if (msg.type === 'host-left') {
+        lfSetRoomStatus('L’hôte a quitté le salon.', true); lfDisconnectRoom(true);
+      } else if (msg.type === 'game-start') {
+        lfSetRoomStatus('Le salon a lancé le départ. La synchronisation du moteur de jeu reste à connecter.', true);
+      }
+    });
+    ws.addEventListener('error', function () {
+      if (lfSocket === ws) lfSetRoomStatus('Connexion impossible. Vérifie que le serveur est déployé et que son adresse est correcte.', true);
+    });
+    ws.addEventListener('close', function () {
+      if (lfSocket === ws) lfDisconnectRoom(true);
+    });
+  }
+  function lfRenderRoom() {
+    lfRoomDetails.hidden = false;
+    lfRoomDetails.textContent = '';
+    var title = document.createElement('p'); title.style.cssText='font-size:18px;font-weight:bold;letter-spacing:3px;margin:4px 0 8px';
+    title.textContent = 'CODE : ' + lfRoomCode; lfRoomDetails.appendChild(title);
+    var list = document.createElement('div');
+    list.textContent = 'Joueurs (' + lfRoomPlayers.length + '/6) : ' + lfRoomPlayers.map(function(p){return p.name + (p.host ? ' ★' : '');}).join(', ');
+    lfRoomDetails.appendChild(list);
+    if (lfRoomHost) {
+      var start = document.createElement('button'); start.type='button'; start.className='primary wide'; start.style.marginTop='8px'; start.textContent='Lancer le salon';
+      start.addEventListener('click', function () {
+        if (!lfSocket || lfSocket.readyState !== WebSocket.OPEN) return lfSetRoomStatus('Connexion perdue.',true);
+        if (lfRoomPlayers.length < 2) return lfSetRoomStatus('Il faut au moins deux joueurs.',true);
+        lfSocket.send(JSON.stringify({type:'start',seed:st.seed,size:st.size,bots:Math.max(0,st.bots-lfRoomPlayers.length+1)}));
+        lfSetRoomStatus('Demande de lancement envoyée. Le moteur de jeu partagé doit encore être raccordé.',true);
+      });
+      lfRoomDetails.appendChild(start);
+    }
+  }
+  $('lfCreateRoom').addEventListener('click', function(){lfConnectRoom('create');});
+  $('lfJoinRoom').addEventListener('click', function(){lfConnectRoom('join');});
+  $('lfLeaveRoom').addEventListener('click', function(){lfDisconnectRoom(false);});
 
   /* ---------- Boucle principale ---------- */
   var last = 0, acc = 0, hudT = 0;
