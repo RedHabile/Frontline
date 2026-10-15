@@ -93,7 +93,7 @@ wss.on('connection', (ws) => {
     }
 
     // Relay gameplay commands/snapshots only to members of the same private room.
-    if (msg.type === 'action' || msg.type === 'snapshot' || msg.type === 'state' || msg.type === 'chat') {
+    if (msg.type === 'action' || msg.type === 'snapshot' || msg.type === 'state' || msg.type === 'chat' || msg.type === 'pause' || msg.type === 'diplomacy-offer' || msg.type === 'diplomacy-answer') {
       if (JSON.stringify(msg).length > 48 * 1024) return send(ws, { type: 'error', message: 'Message trop volumineux.' });
       if (msg.type === 'snapshot' || msg.type === 'state') {
         if (!ws.isHost) return send(ws, { type: 'error', message: 'Seul l’hôte peut envoyer l’état de la partie.' });
