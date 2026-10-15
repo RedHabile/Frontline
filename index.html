@@ -1317,26 +1317,42 @@ h2 { font-size: 34px; }
 
     while (budget-- > 0 && front.length) {
       var idx = 0, t;
+      var compact = [], bestLinks = 1;
 
-      // Open Front : répartit les captures sur toute la frontière de contact.
-      // La frontière est reconstruite après chaque pixel, et le curseur tourne
-      // entre des zones éloignées au lieu de pousser un seul couloir.
-      var focusTurn = a.fx >= 0 && (a.gained % 8 === 0);
-      if (focusTurn) {
-        var bestDist = Infinity;
+      // Priorité aux pixels qui referment les petits trous et rendent le front continu.
+      // On compte les voisins déjà conquis autour de chaque pixel candidat.
+      for (var ci = 0; ci < front.length; ci++) {
+        var ct = front[ci], cx = ct % W, cy = (ct / W) | 0, links = 0, nn;
+        if (cx > 0) { nn = ct - 1; if (owner[nn] === a.owner) links++; }
+        if (cx < W - 1) { nn = ct + 1; if (owner[nn] === a.owner) links++; }
+        if (cy > 0) { nn = ct - W; if (owner[nn] === a.owner) links++; }
+        if (cy < H - 1) { nn = ct + W; if (owner[nn] === a.owner) links++; }
+        if (links > bestLinks) { bestLinks = links; compact = [ci]; }
+        else if (links === bestLinks) compact.push(ci);
+      }
+
+      // Les candidats avec 2+ voisins amis comblent d'abord les creux.
+      // Sinon, on avance par secteurs réguliers pour éviter le couloir unique.
+      if (bestLinks >= 2 && compact.length) {
+        idx = compact[(a.frontCursor || 0) % compact.length];
+        a.frontCursor = (a.frontCursor || 0) + 1;
+      } else {
+        var sectors = Math.min(16, front.length);
+        var sector = (a.frontCursor || 0) % sectors;
+        idx = Math.min(front.length - 1, Math.floor((sector + 0.5) * front.length / sectors));
+        a.frontCursor = sector + 1;
+      }
+
+      // Le clic garde un léger bonus, sans attirer toute l'invasion vers un seul point.
+      if (a.fx >= 0 && a.gained % 10 === 0) {
+        var bestDist = Infinity, focusIdx = -1;
         for (var fi2 = 0; fi2 < front.length; fi2++) {
           var candidate = front[fi2];
           var dxFocus = (candidate % W) - a.fx, dyFocus = ((candidate / W) | 0) - a.fy;
           var dist2 = dxFocus * dxFocus + dyFocus * dyFocus;
-          if (dist2 < bestDist) { bestDist = dist2; idx = fi2; }
+          if (dist2 < bestDist) { bestDist = dist2; focusIdx = fi2; }
         }
-      } else {
-        // 12 secteurs répartis de la première à la dernière zone du front.
-        // Le secteur change à chaque pixel : l'expansion se fait partout.
-        var sectors = Math.min(12, front.length);
-        var sector = (a.frontCursor || 0) % sectors;
-        idx = Math.min(front.length - 1, Math.floor((sector + 0.5) * front.length / sectors));
-        a.frontCursor = sector + 1;
+        if (focusIdx >= 0) idx = focusIdx;
       }
       t = front[idx];
 
