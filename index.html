@@ -1092,6 +1092,12 @@ h2 { font-size: 34px; }
         if (ed <= fd && (s.type !== 'carrier' || o.type !== 'carrier') && (o.type !== 'sub' || s.type === 'sub' || (s.type === 'destroyer' && ed <= P.subDetectRange * P.subDetectRange))) { fd = ed; foe = o; }
       }
       if (foe) {
+        // Les porte-avions gardent leurs raids actifs pendant les combats navals.
+        if (s.type === 'carrier' && s.mission === 'attack' && this.tick >= s.shot) {
+          var autoStrike = null, autoStrikeD = Infinity;
+          for (k = 0; k < this.buildings.length; k++) { var asb=this.buildings[k]; if(asb.owner===s.owner || this.allied(s.owner,asb.owner)) continue; var asdx=(asb.tile%W)+0.5-s.x, asdy=((asb.tile/W)|0)+0.5-s.y, asdd=asdx*asdx+asdy*asdy; if(asdd<autoStrikeD){autoStrikeD=asdd;autoStrike=asb;} }
+          if (autoStrike) { s.orderTarget=autoStrike.id; s.orderTile=autoStrike.tile; s.shot=this.tick+P.carrierShot; var asx=autoStrike.tile%W, asy=(autoStrike.tile/W)|0; this.planes.push({id:this.nextBid++,owner:s.owner,x0:s.x,y0:s.y,x1:asx,y1:asy,len:Math.max(1,Math.sqrt(autoStrikeD)),pos:0,bid:autoStrike.id,tile:autoStrike.tile,x:s.x,y:s.y,ang:Math.atan2(asy-s.y,asx-s.x),carrier:true,carrierId:s.id}); }
+        }
         // Un porte-avions donne suite à son ordre même s'il est engagé dans un combat naval.
         if (s.type === 'carrier' && s.orderTarget && this.tick >= s.shot) {
           var strikeTarget = null;
@@ -1601,8 +1607,9 @@ h2 { font-size: 34px; }
   Sim.prototype.launchRaid = function (pid, tile) {
     var p = this.players[pid];
     if (!p || !p.alive || !p.spawned) return { ok: false, reason: 'invalid' };
-    if (p.count.airport < 1) return { ok: false, reason: 'airport' };
-    if (!tl(p, 'air')) return { ok: false, reason: 'tech', tech: 'air' };
+    var carrierAvailable = this.ships.some(function(sh){ return sh.owner === pid && sh.type === 'carrier'; });
+    if (p.count.airport < 1 && !carrierAvailable) return { ok: false, reason: 'airport' };
+    if (!tl(p, 'air') && !carrierAvailable) return { ok: false, reason: 'tech', tech: 'air' };
     if (tile < 0 || tile >= N) return { ok: false, reason: 'land' };
     var tx = tile % W, ty = (tile / W) | 0, tb = null, bd = 49, k, dx, dy, dd;
     for (k = 0; k < this.buildings.length; k++) {
@@ -1613,15 +1620,19 @@ h2 { font-size: 34px; }
     if (!tb) return { ok: false, reason: 'nobuild' };
     if (p.allies.has(tb.owner)) return { ok: false, reason: 'ally' };
     if (p.gold < P.raidCost) return { ok: false, reason: 'gold' };
-    var ax = tb.tile % W, ay = (tb.tile / W) | 0, from = null, fd = P.raidRange * P.raidRange;
+    var ax = tb.tile % W, ay = (tb.tile / W) | 0, from = null, fromShip = null, fd = P.raidRange * P.raidRange;
     for (k = 0; k < this.buildings.length; k++) {
       var a = this.buildings[k]; if (a.type !== 'airport' || a.owner !== pid) continue;
       dx = (a.tile % W) - ax; dy = ((a.tile / W) | 0) - ay; dd = dx * dx + dy * dy;
-      if (dd <= fd) { fd = dd; from = a; }
+      if (dd <= fd) { fd = dd; from = a; fromShip = null; }
     }
-    if (!from) return { ok: false, reason: 'range' };
+    if (!from) {
+      for (k = 0; k < this.ships.length; k++) { var carrier = this.ships[k]; if (carrier.owner !== pid || carrier.type !== 'carrier') continue; dx = carrier.x-ax; dy=carrier.y-ay; dd=dx*dx+dy*dy; if(dd<fd){fd=dd;fromShip=carrier;from=null;} }
+    }
+    if (!from && !fromShip) return { ok: false, reason: 'range' };
     p.gold -= P.raidCost;
-    var x0 = from.tile % W, y0 = (from.tile / W) | 0;
+    var x0 = fromShip ? fromShip.x : from.tile % W, y0 = fromShip ? fromShip.y : (from.tile / W) | 0;
+    if (fromShip) fromShip.shot = Math.max(fromShip.shot || 0, this.tick + P.carrierShot);
     var pl = { id: this.nextBid++, owner: pid, x0: x0, y0: y0, x1: ax, y1: ay, len: Math.max(1, Math.sqrt(fd)), pos: 0, bid: tb.id, tile: tb.tile, x: x0, y: y0, ang: Math.atan2(ay - y0, ax - x0) };
     this.planes.push(pl);
     this.events.push({ type: 'raidLaunch', owner: pid, target: tb.owner, what: tb.type });
@@ -2277,7 +2288,7 @@ h2 { font-size: 34px; }
   function tlv(p, k) { return (p && p.tech && p.tech[k]) || 0; }
   function techNeeded(k) {   // recherche à faire avant de pouvoir utiliser cet objet (ou null)
     var h = st.sim.human, need = S.BUILD_TECH[k];
-    if (k === 'ship' || k === 'destroyer' || k === 'carrier') need = 'naval'; else if (k === 'sub') need = 'rocket'; else if (k === 'raid') need = 'air'; else if (k === 'atom') need = 'rocket'; else if (k === 'hydro' || k === 'mirv') need = k;
+    if (k === 'ship' || k === 'destroyer' || k === 'carrier') need = 'naval'; else if (k === 'sub') need = 'rocket'; else if (k === 'raid' && !st.sim.ships.some(function(sh){return sh.owner===st.sim.human.id && sh.type==='carrier';})) need = 'air'; else if (k === 'atom') need = 'rocket'; else if (k === 'hydro' || k === 'mirv') need = k;
     return need && !tlv(h, need) ? need : null;
   }
   var REQ = { silo: 'silo', sub: 'sous-marin', port: 'port', airport: 'aéroport' };
@@ -2749,7 +2760,7 @@ h2 { font-size: 34px; }
     var sim = st.sim, h = sim.human, t = rad.tile, o = sim.owner[t], items = [];
     var clickedBuilding = sim.bmap && sim.bmap.get(t), clickedPort = clickedBuilding && clickedBuilding.type === 'port' && clickedBuilding.owner === h.id;
     function add(id, label, svg, run, cost, state, pv, lock) { items.push({ id: id, label: label, svg: svg, run: run, cost: cost, state: state || '', pv: pv, lock: lock }); }
-    function lockOf(b) { if (b.req === 'sub') return !sim.ships.some(function(sh){ return sh.owner === h.id && sh.type === 'sub'; }); return b.req && h.count[b.req] < 1; }
+    function lockOf(b) { if (b.req === 'sub') return !sim.ships.some(function(sh){ return sh.owner === h.id && sh.type === 'sub'; }); if (b.k === 'raid') return h.count.airport < 1 && !sim.ships.some(function(sh){return sh.owner===h.id && sh.type==='carrier';}); return b.req && h.count[b.req] < 1; }
     function techLock(k) { var nt = techNeeded(k); return nt ? function () { toast('Recherche requise : ' + TBY[nt].name + '.'); closeRadial(); openRes(nt); } : null; }
     function itemFor(b) {
       var c = costOf(b.k), tk = techNeeded(b.k), state = tk || lockOf(b) ? 'off' : (h.gold < c ? 'poor' : '');
