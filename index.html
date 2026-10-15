@@ -541,6 +541,7 @@ h2 { font-size: 34px; }
     samRadius: 34, samChance: 0.75,
     bomb: { atom: { cost: 900, inner: 9, outer: 16 }, hydro: { cost: 4500, inner: 18, outer: 32 }, mirv: { cost: 20000, inner: 5, outer: 10, warheads: 9, spread: 22 } }, bombSpeed: 2.2,
     shipCost: 700, shipGrow: 0.3, shipHp: 40, shipSpeed: 0.45, shipRange: 8, shipDmg: 0.35, shipShot: 35,
+    destroyerCost: 1800, destroyerHp: 75, destroyerSpeed: 0.58, destroyerRange: 11, destroyerDmg: 1.15, destroyerShot: 24, subDetectRange: 30,
     carrierCost: 2600, carrierHp: 125, carrierSpeed: 0.34, carrierRange: 15, carrierShot: 60,
     subCost: 1450, subHp: 24, subSpeed: 0.72, subRange: 6, subDmg: 1.25, subShot: 22,
     bhp: { city: 8, factory: 6, port: 8, def: 6, silo: 10, sam: 6, airport: 8 },
@@ -802,6 +803,7 @@ h2 { font-size: 34px; }
   Sim.prototype._shipCount = function (pid) { var n = 0; for (var k = 0; k < this.ships.length; k++) if (this.ships[k].owner === pid) n++; return n; };
   Sim.prototype.cost = function (p, type) {
     if (type === 'ship') return Math.round(P.shipCost * (1 + P.shipGrow * this._shipCount(p.id)));
+    if (type === 'destroyer') return P.destroyerCost;
     if (type === 'carrier') return P.carrierCost;
     if (type === 'sub') return P.subCost;
     if (P.bomb[type]) return P.bomb[type].cost;
@@ -946,7 +948,7 @@ h2 { font-size: 34px; }
   };
   Sim.prototype.buildShip = function (pid, vesselType, portTile) {
     vesselType = vesselType || 'ship';
-    if (['ship', 'carrier', 'sub'].indexOf(vesselType) < 0) vesselType = 'ship';
+    if (['ship', 'destroyer', 'carrier', 'sub'].indexOf(vesselType) < 0) vesselType = 'ship';
     var p = this.players[pid];
     if (!p || !p.alive || !p.spawned) return { ok: false, reason: 'invalid' };
     if (!tl(p, 'naval')) return { ok: false, reason: 'tech', tech: 'naval' };
@@ -954,7 +956,7 @@ h2 { font-size: 34px; }
     if (p.count.port < 1) return { ok: false, reason: 'port' };
     var c = this.cost(p, vesselType); if (p.gold < c) return { ok: false, reason: 'gold' };
     var owned = 0; for (k = 0; k < this.ships.length; k++) if (this.ships[k].owner === pid && this.ships[k].type === vesselType) owned++;
-    var cap = vesselType === 'carrier' ? 2 : (vesselType === 'sub' ? 4 : 6);
+    var cap = vesselType === 'carrier' ? 2 : (vesselType === 'sub' ? 4 : (vesselType === 'destroyer' ? 4 : 6));
     if (owned >= cap) return { ok: false, reason: 'boats' };
     var ports = [], k;
     for (k = 0; k < this.buildings.length; k++) if (this.buildings[k].type === 'port' && this.buildings[k].owner === pid) ports.push(this.buildings[k]);
@@ -964,10 +966,17 @@ h2 { font-size: 34px; }
     var sea = this._seaNear(port.tile);
     if (sea < 0) return { ok: false, reason: 'sea' };
     p.gold -= c;
-    var s = { id: this.nextBid++, type: vesselType, owner: pid, x: (sea % W) + 0.5, y: ((sea / W) | 0) + 0.5, hp: vesselType === 'carrier' ? P.carrierHp : (vesselType === 'sub' ? P.subHp : P.shipHp), home: port.tile, tx: -1, ty: -1, think: 0, shot: 0, ang: 0, path: null, pi: 0, gkey: '', replan: 0, firing: null, orderTarget: 0, orderTile: -1, missileReady: 0 };
+    var s = { id: this.nextBid++, type: vesselType, owner: pid, x: (sea % W) + 0.5, y: ((sea / W) | 0) + 0.5, hp: vesselType === 'carrier' ? P.carrierHp : (vesselType === 'sub' ? P.subHp : (vesselType === 'destroyer' ? P.destroyerHp : P.shipHp)), mission: 'patrol', home: port.tile, tx: -1, ty: -1, think: 0, shot: 0, ang: 0, path: null, pi: 0, gkey: '', replan: 0, firing: null, orderTarget: 0, orderTile: -1, missileReady: 0 };
     this.ships.push(s);
     this.events.push({ type: 'ship', owner: pid, vessel: vesselType });
     return { ok: true, ship: s };
+  };
+  Sim.prototype.orderShipMission = function (pid, shipId, mission) {
+    var sh = null;
+    for (var i = 0; i < this.ships.length; i++) if (this.ships[i].id === shipId && this.ships[i].owner === pid) { sh = this.ships[i]; break; }
+    if (!sh || (mission !== 'patrol' && mission !== 'attack')) return { ok: false, reason: 'ship' };
+    sh.mission = mission; sh.orderTarget = 0; sh.orderTile = -1; sh.path = null; sh.pi = 0; sh.gkey = ''; sh.tx = -1; sh.ty = -1;
+    return { ok: true, ship: sh };
   };
   Sim.prototype.orderCarrierStrike = function (pid, tile) {
     var p = this.players[pid], target = this.bmap.get(tile), count = 0;
@@ -1017,6 +1026,11 @@ h2 { font-size: 34px; }
         s.think = this.tick + 15; s.tx = -1;
         var bd = 60 * 60 + 1, dx, dy, dd;
         // Un porte-avions conserve sa cible jusqu'à la destruction du bâtiment.
+        if (s.type === 'carrier' && s.mission === 'attack' && !s.orderTarget) {
+          var autoTarget = null, autoDist = Infinity;
+          for (k = 0; k < this.buildings.length; k++) { var ab = this.buildings[k]; if (ab.owner === s.owner || this.allied(s.owner, ab.owner)) continue; var adx = (ab.tile % W) + 0.5 - s.x, ady = ((ab.tile / W) | 0) + 0.5 - s.y, add = adx * adx + ady * ady; if (add < autoDist) { autoDist = add; autoTarget = ab; } }
+          if (autoTarget) s.orderTarget = autoTarget.id;
+        }
         if (s.type === 'carrier' && s.orderTarget) {
           var orderedBuilding = null;
           for (k = 0; k < this.buildings.length; k++) {
@@ -1042,7 +1056,7 @@ h2 { font-size: 34px; }
         if (s.tx < 0) {
           bd = 1e9;
           for (k = 0; k < this.buildings.length; k++) {
-            var b = this.buildings[k]; if (b.owner === s.owner || this.allied(s.owner, b.owner) || !this._isCoast(b.tile)) continue;
+            var b = this.buildings[k]; if (b.owner === s.owner || this.allied(s.owner, b.owner) || (s.mission !== 'attack' && !this._isCoast(b.tile))) continue;
             dx = (b.tile % W) + 0.5 - s.x; dy = ((b.tile / W) | 0) + 0.5 - s.y; dd = dx * dx + dy * dy;
             if (dd < bd) { bd = dd; s.tx = (b.tile % W) + 0.5; s.ty = ((b.tile / W) | 0) + 0.5; }
           }
@@ -1051,11 +1065,16 @@ h2 { font-size: 34px; }
       }
       var gx = s.tx, gy = s.ty;
       if (gx < 0) { gx = (s.home % W) + 0.5; gy = ((s.home / W) | 0) + 0.5; }
-      var vesselSpeed = s.type === 'carrier' ? P.carrierSpeed : (s.type === 'sub' ? P.subSpeed : P.shipSpeed);
-      var vesselRange = s.type === 'carrier' ? P.carrierRange : (s.type === 'sub' ? P.subRange : P.shipRange);
+      if (s.type === 'carrier' && this.tick >= s.shot) {
+        var threatBoat = null, threatD = 55 * 55;
+        for (k = 0; k < this.boats.length; k++) { var tb = this.boats[k]; if (tb.owner === s.owner || this.allied(s.owner, tb.owner)) continue; var tdx = tb.x-s.x, tdy = tb.y-s.y, tdd = tdx*tdx+tdy*tdy; if (tdd < threatD) { threatD=tdd; threatBoat=tb; } }
+        if (threatBoat) { s.shot = this.tick + P.carrierShot; var bx2=threatBoat.x, by2=threatBoat.y; this.planes.push({id:this.nextBid++,owner:s.owner,x0:s.x,y0:s.y,x1:bx2,y1:by2,len:Math.max(1,Math.sqrt(threatD)),pos:0,bid:0,tile:-1,x:s.x,y:s.y,ang:Math.atan2(by2-s.y,bx2-s.x),carrier:true,carrierId:s.id,boatId:threatBoat.id}); }
+      }
+      var vesselSpeed = s.type === 'carrier' ? P.carrierSpeed : (s.type === 'sub' ? P.subSpeed : (s.type === 'destroyer' ? P.destroyerSpeed : P.shipSpeed));
+      var vesselRange = s.type === 'carrier' ? P.carrierRange : (s.type === 'sub' ? P.subRange : (s.type === 'destroyer' ? P.destroyerRange : P.shipRange));
       if (s.type === 'ship') { for (k = 0; k < this.ships.length; k++) { var cv = this.ships[k]; if (cv.type === 'carrier' && cv.owner === s.owner && (cv.x-s.x)*(cv.x-s.x)+(cv.y-s.y)*(cv.y-s.y) < 18*18) { vesselRange += 2; break; } } }
-      var vesselDmg = s.type === 'sub' ? P.subDmg : P.shipDmg;
-      var vesselShot = s.type === 'carrier' ? P.carrierShot : (s.type === 'sub' ? P.subShot : P.shipShot);
+      var vesselDmg = s.type === 'sub' ? P.subDmg : (s.type === 'destroyer' ? P.destroyerDmg : P.shipDmg);
+      var vesselShot = s.type === 'carrier' ? P.carrierShot : (s.type === 'sub' ? P.subShot : (s.type === 'destroyer' ? P.destroyerShot : P.shipShot));
       var key = Math.round(gx / 3) + ',' + Math.round(gy / 3);
       if (s.gkey !== key || (this.tick >= s.replan && (!s.path || s.pi >= s.path.length))) {
         s.gkey = key; s.replan = this.tick + 45; s.path = this._shipPath(s, gx, gy); s.pi = 0;
@@ -1070,7 +1089,7 @@ h2 { font-size: 34px; }
       for (k = 0; k < this.ships.length; k++) {
         o = this.ships[k]; if (o.owner === s.owner || this.allied(s.owner, o.owner)) continue;
         var ex = o.x - s.x, ey = o.y - s.y, ed = ex * ex + ey * ey;
-        if (ed <= fd && (s.type !== 'carrier' || o.type !== 'carrier')) { fd = ed; foe = o; }
+        if (ed <= fd && (s.type !== 'carrier' || o.type !== 'carrier') && (o.type !== 'sub' || s.type === 'sub' || (s.type === 'destroyer' && ed <= P.subDetectRange * P.subDetectRange))) { fd = ed; foe = o; }
       }
       if (foe) {
         // Un porte-avions donne suite à son ordre même s'il est engagé dans un combat naval.
@@ -1088,7 +1107,8 @@ h2 { font-size: 34px; }
         }
         var damage = vesselDmg * (1 + 0.35 * tl(this.players[s.owner], 'dNaval'));
         if (s.type === 'sub') damage *= 1.35;
-        if (foe.type === 'sub' && s.type !== 'sub') damage *= 0.45;
+        if (s.type === 'destroyer' && foe.type === 'sub') damage *= 2.4;
+        if (foe.type === 'sub' && s.type !== 'sub' && s.type !== 'destroyer') damage *= 0.08;
         foe.hp -= damage; s.firing = foe;
       }
       else {
@@ -1613,6 +1633,12 @@ h2 { font-size: 34px; }
       var t = Math.min(1, pl.pos / pl.len); pl.x = pl.x0 + (pl.x1 - pl.x0) * t; pl.y = pl.y0 + (pl.y1 - pl.y0) * t;
       if (pl.pos < pl.len) continue;
       this.planes.splice(i, 1);
+      if (pl.boatId) {
+        var targetBoat = null;
+        for (var bi = 0; bi < this.boats.length; bi++) if (this.boats[bi].id === pl.boatId) { targetBoat = this.boats[bi]; break; }
+        if (targetBoat) { var boatIdx = this.boats.indexOf(targetBoat); if (boatIdx >= 0) this.boats.splice(boatIdx,1); this.events.push({ type: 'intercepted', owner: pl.owner, x: pl.x1, y: pl.y1, plane: true, transport: true }); }
+        continue;
+      }
       var b = this.bmap.get(pl.tile);
       if (!b || b.id !== pl.bid) continue;
       if (pl.carrier) {
@@ -2245,12 +2271,13 @@ h2 { font-size: 34px; }
     { k: 'mirv', kind: 'bomb', req: 'sub', name: 'MIRV', desc: P.bomb.mirv.warheads + ' ogives', svg: Art.icon('mirv') },
     { k: 'raid', kind: 'raid', req: 'airport', name: 'Raid aérien', desc: 'Frappe un bâtiment ennemi', svg: Art.icon('plane') }
   ];
+  BUILD.push({ k: 'destroyer', kind: 'ship', req: 'port', name: 'Destroyer anti-sous-marin', desc: 'Détecte et neutralise les sous-marins ennemis', svg: Art.icon('ship') });
   var ITEM = {}; BUILD.forEach(function (b) { ITEM[b.k] = b; });
   var TECHS = S.TECH, TBY = S.TECH_BY;
   function tlv(p, k) { return (p && p.tech && p.tech[k]) || 0; }
   function techNeeded(k) {   // recherche à faire avant de pouvoir utiliser cet objet (ou null)
     var h = st.sim.human, need = S.BUILD_TECH[k];
-    if (k === 'ship') need = 'naval'; else if (k === 'sub') need = 'rocket'; else if (k === 'raid') need = 'air'; else if (k === 'atom') need = 'rocket'; else if (k === 'hydro' || k === 'mirv') need = k;
+    if (k === 'ship' || k === 'destroyer' || k === 'carrier') need = 'naval'; else if (k === 'sub') need = 'rocket'; else if (k === 'raid') need = 'air'; else if (k === 'atom') need = 'rocket'; else if (k === 'hydro' || k === 'mirv') need = k;
     return need && !tlv(h, need) ? need : null;
   }
   var REQ = { silo: 'silo', sub: 'sous-marin', port: 'port', airport: 'aéroport' };
@@ -2657,6 +2684,9 @@ h2 { font-size: 34px; }
     if (st.phase !== 'play' || st.spectator) return;
     var h = sim.human; if (!h || !h.alive) return;
     if (st.paused) { toast('Le jeu est en pause.'); return; }
+    var wx = (sx - cw / 2) / cam.z + cam.x, wy = (sy - ch / 2) / cam.z + cam.y, picked = null, pickD = Infinity;
+    for (var si = 0; si < sim.ships.length; si++) { var candidateShip = sim.ships[si]; if (candidateShip.owner !== h.id) continue; var sd = Math.pow(candidateShip.x-wx,2)+Math.pow(candidateShip.y-wy,2); if (sd < pickD && sd <= Math.pow(Math.max(1.8,8/cam.z),2)) { picked=candidateShip; pickD=sd; } }
+    if (picked) { openRadial(Math.max(0,Math.min(N-1,Math.floor(picked.y)*W+Math.floor(picked.x))),sx,sy,'shipOrders'); rad.shipId=picked.id; drawRadial(); return; }
     if (sim.terrain[t] === 0) return;
     closeDip();
     pings.push({ x: t % W, y: (t / W) | 0, t: ts || performance.now() });
@@ -2733,11 +2763,18 @@ h2 { font-size: 34px; }
       BUILD.forEach(function (b) { if (b.kind === 'place') itemFor(b); });
       return items;
     }
+    if (rad.level === 'shipOrders') {
+      var selectedShip = sim.ships.filter(function(sh){return sh.id === rad.shipId && sh.owner === h.id;})[0];
+      if (!selectedShip) { add('close','Fermer',ICON.attack,function(){closeRadial();}); return items; }
+      add('patrol','Patrouille',Art.icon('ship'),function(){var rr=sim.orderShipMission(h.id,selectedShip.id,'patrol');if(rr.ok){lfBroadcastAction({kind:'shipMission',shipId:selectedShip.id,mission:'patrol'});toast('Patrouille : protection du littoral et interception des débarquements.');}closeRadial();},null,'',null);
+      add('attackMission','Attaquer les structures',Art.icon('attack'),function(){var rr=sim.orderShipMission(h.id,selectedShip.id,'attack');if(rr.ok){lfBroadcastAction({kind:'shipMission',shipId:selectedShip.id,mission:'attack'});toast(selectedShip.type==='carrier'?'Porte-avions : raids automatiques et interception des débarquements.':'Le navire attaque automatiquement les structures ennemies.');}closeRadial();},null,'',null);
+      return items;
+    }
     if (rad.level === 'ships') {
-      ['ship','carrier','sub'].forEach(function(vt){
+      ['ship','destroyer','carrier','sub'].forEach(function(vt){
         var vi = ITEM[vt], vc = costOf(vt), vl = techNeeded(vt), owned = 0;
         for (var si = 0; si < sim.ships.length; si++) if (sim.ships[si].owner === h.id && sim.ships[si].type === vt) owned++;
-        var cap = vt === 'carrier' ? 2 : (vt === 'sub' ? 4 : 6), blocked = vl || h.gold < vc || owned >= cap;
+        var cap = vt === 'carrier' ? 2 : (vt === 'sub' || vt === 'destroyer' ? 4 : 6), blocked = vl || h.gold < vc || owned >= cap;
         add(vt, vi.name, vi.svg, function(){
           if (vl) { techLock(vt)(); return; }
           var vr = sim.buildShip(h.id, vt, t);
@@ -3680,7 +3717,8 @@ h2 { font-size: 34px; }
       else if (action.kind === 'bomb') sim.launchBomb(player.id, action.item, action.target);
       else if (action.kind === 'raid') sim.launchRaid(player.id, action.target);
       else if (action.kind === 'carrierStrike') sim.orderCarrierStrike(player.id, action.target);
-      else if (action.kind === 'shipBuild' && ['ship','carrier','sub'].indexOf(action.vessel) >= 0) sim.buildShip(player.id, action.vessel, Number.isInteger(action.portTile) ? action.portTile : undefined);
+      else if (action.kind === 'shipMission') sim.orderShipMission(player.id, action.shipId, action.mission);
+      else if (action.kind === 'shipBuild' && ['ship','destroyer','carrier','sub'].indexOf(action.vessel) >= 0) sim.buildShip(player.id, action.vessel, Number.isInteger(action.portTile) ? action.portTile : undefined);
     } catch (e) { console.warn('Action réseau ignorée', e); }
   }
 
