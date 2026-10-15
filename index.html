@@ -383,7 +383,7 @@ h2 { font-size: 34px; }
     </dl>
     <div class="btns">
       <button id="bWatch" type="button" class="ghost" hidden>Continuer à regarder</button>
-      <button id="bAgain" type="button" class="primary">Rejouer</button>
+      <button id="bAgain" type="button" class="primary">Menu principal</button>
     </div>
   </div>
 </div>
@@ -532,7 +532,7 @@ h2 { font-size: 34px; }
 
   var P = {
     growBase: 1.6, growTile: 0.009, growTroop: 0.0009, maxBase: 1800, maxTile: 55,
-    neutralCost: 8.5, defMul: 1.45, defBase: 2, defLoss: 0.3, speedDiv: 17, speedCap: 30, startTroops: 1800,
+    neutralCost: 8.5, defMul: 1.45, defBase: 2, defLoss: 0.3, speedDiv: 17, speedCap: 45, startTroops: 1800,
     goldBase: 0.1, goldTile: 0.0015, startGold: 200,
     cityTroops: 3000, factoryGold: 0.35, portGold: 0.15,
     cost: { city: 300, factory: 450, port: 350, def: 200, silo: 1200, sam: 900, airport: 800 },
@@ -541,8 +541,8 @@ h2 { font-size: 34px; }
     samRadius: 34, samChance: 0.75,
     bomb: { atom: { cost: 900, inner: 9, outer: 16 }, hydro: { cost: 4500, inner: 18, outer: 32 }, mirv: { cost: 20000, inner: 5, outer: 10, warheads: 9, spread: 22 } }, bombSpeed: 2.2,
     shipCost: 700, shipGrow: 0.3, shipHp: 40, shipSpeed: 0.45, shipRange: 8, shipDmg: 0.35, shipShot: 35,
-    carrierCost: 2600, carrierHp: 115, carrierSpeed: 0.28, carrierRange: 15, carrierShot: 85,
-    subCost: 1450, subHp: 24, subSpeed: 0.58, subRange: 6, subDmg: 1.05, subShot: 22,
+    carrierCost: 2600, carrierHp: 125, carrierSpeed: 0.34, carrierRange: 15, carrierShot: 60,
+    subCost: 1450, subHp: 24, subSpeed: 0.72, subRange: 6, subDmg: 1.25, subShot: 22,
     bhp: { city: 8, factory: 6, port: 8, def: 6, silo: 10, sam: 6, airport: 8 },
     raidCost: 250, raidDmg: 5, raidSpeed: 1.6, raidRange: 130, raidSam: 0.45, vGold: 1, vTroop: 0.15, vTile: 5, winShare: 0.8,
     boatSpeed: 0.8, maxBoats: 3, focusDist: 2.7, fillW: 1.35, focusShare: 0.88,
@@ -607,7 +607,7 @@ h2 { font-size: 34px; }
     this.netLocalId = opts.netLocalId || '';
     if (this.netPlayers && this.netPlayers.length) {
       // Every client creates the same human slots in the same order.
-      var palette = [[242,177,60],[73,153,255],[239,83,80],[87,196,123],[177,110,240],[240,133,61]];
+      var palette = [[0,210,255],[255,80,80],[255,205,0],[180,90,255],[70,230,115],[255,125,25]];
       for (var np = 0; np < this.netPlayers.length; np++) {
         var entry = this.netPlayers[np] || {};
         var color = palette[np % palette.length];
@@ -950,6 +950,7 @@ h2 { font-size: 34px; }
     var p = this.players[pid];
     if (!p || !p.alive || !p.spawned) return { ok: false, reason: 'invalid' };
     if (!tl(p, 'naval')) return { ok: false, reason: 'tech', tech: 'naval' };
+    if (vesselType === 'sub' && !tl(p, 'rocket')) return { ok: false, reason: 'tech', tech: 'rocket' };
     if (p.count.port < 1) return { ok: false, reason: 'port' };
     var c = this.cost(p, vesselType); if (p.gold < c) return { ok: false, reason: 'gold' };
     var owned = 0; for (k = 0; k < this.ships.length; k++) if (this.ships[k].owner === pid && this.ships[k].type === vesselType) owned++;
@@ -1072,6 +1073,19 @@ h2 { font-size: 34px; }
         if (ed <= fd && (s.type !== 'carrier' || o.type !== 'carrier')) { fd = ed; foe = o; }
       }
       if (foe) {
+        // Un porte-avions donne suite à son ordre même s'il est engagé dans un combat naval.
+        if (s.type === 'carrier' && s.orderTarget && this.tick >= s.shot) {
+          var strikeTarget = null;
+          for (k = 0; k < this.buildings.length; k++) if (this.buildings[k].id === s.orderTarget && this.buildings[k].owner !== s.owner && !this.allied(s.owner, this.buildings[k].owner)) { strikeTarget = this.buildings[k]; break; }
+          if (strikeTarget) {
+            s.shot = this.tick + P.carrierShot;
+            var sax = strikeTarget.tile % W, say = (strikeTarget.tile / W) | 0;
+            this.planes.push({ id: this.nextBid++, owner: s.owner, x0: s.x, y0: s.y, x1: sax, y1: say,
+              len: Math.max(1, Math.sqrt((sax-s.x)*(sax-s.x)+(say-s.y)*(say-s.y))), pos: 0,
+              bid: strikeTarget.id, tile: strikeTarget.tile, x: s.x, y: s.y,
+              ang: Math.atan2(say-s.y,sax-s.x), carrier: true, carrierId: s.id });
+          } else { s.orderTarget = 0; s.orderTile = -1; }
+        }
         var damage = vesselDmg * (1 + 0.35 * tl(this.players[s.owner], 'dNaval'));
         if (s.type === 'sub') damage *= 1.35;
         if (foe.type === 'sub' && s.type !== 'sub') damage *= 0.45;
@@ -1337,7 +1351,9 @@ h2 { font-size: 34px; }
     var ratio = tgt ? a.troops / defenderForce : 3.0;
     var ratioBoost = Math.pow(Math.max(0.15, ratio), 0.72);
     var stackBoost = Math.pow(Math.max(0.25, a.troops / 1800), 0.22);
-    var speed = 0.75 + 1.15 * ratioBoost * stackBoost;
+    var speed = 1.15 + 1.65 * ratioBoost * stackBoost;
+    // Les grosses armées avancent sensiblement plus vite que les petits détachements.
+    speed *= Math.min(1.8, 0.85 + Math.sqrt(Math.max(0, a.troops) / 1200) * 0.22);
     var nearFocus = false;
     if (a.fx >= 0) {
       for (var fi = 0; fi < front.length; fi++) {
@@ -2207,7 +2223,7 @@ h2 { font-size: 34px; }
   'use strict';
   var S = window.GameSim, Pt = window.GamePaint, W = S.W, H = S.H, N = S.N;
   var FONT = '"Chakra Petch", "Avenir Next", system-ui, sans-serif', MONO = '"IBM Plex Mono", ui-monospace, Menlo, monospace';
-  var COLORS = [[229, 72, 77], [245, 165, 36], [139, 92, 246], [236, 72, 153], [234, 218, 64], [20, 184, 166]];
+  var COLORS = [[0, 210, 255], [255, 80, 80], [255, 205, 0], [180, 90, 255], [70, 230, 115], [255, 125, 25]];
   var DEEP = '#0e2e54';
   var P = S.P;
   function nf(x) { return String(x).replace('.', ','); }
@@ -2234,7 +2250,7 @@ h2 { font-size: 34px; }
   function tlv(p, k) { return (p && p.tech && p.tech[k]) || 0; }
   function techNeeded(k) {   // recherche à faire avant de pouvoir utiliser cet objet (ou null)
     var h = st.sim.human, need = S.BUILD_TECH[k];
-    if (k === 'ship') need = 'naval'; else if (k === 'raid') need = 'air'; else if (k === 'atom') need = 'rocket'; else if (k === 'hydro' || k === 'mirv') need = k;
+    if (k === 'ship') need = 'naval'; else if (k === 'sub') need = 'rocket'; else if (k === 'raid') need = 'air'; else if (k === 'atom') need = 'rocket'; else if (k === 'hydro' || k === 'mirv') need = k;
     return need && !tlv(h, need) ? need : null;
   }
   var REQ = { silo: 'silo', sub: 'sous-marin', port: 'port', airport: 'aéroport' };
