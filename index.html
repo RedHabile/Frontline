@@ -524,8 +524,8 @@ h2 { font-size: 34px; }
   };
 
   var P = {
-    growBase: 1, growTile: 0.005, growTroop: 0.0006, maxBase: 1500, maxTile: 45,
-    neutralCost: 12, defMul: 2.0, defBase: 3, defLoss: 0.5, speedDiv: 12, speedCap: 45, startTroops: 1500,
+    growBase: 1.6, growTile: 0.009, growTroop: 0.0009, maxBase: 1800, maxTile: 55,
+    neutralCost: 8.5, defMul: 1.45, defBase: 2, defLoss: 0.3, speedDiv: 17, speedCap: 30, startTroops: 1800,
     goldBase: 0.1, goldTile: 0.0015, startGold: 200,
     cityTroops: 3000, factoryGold: 0.35, portGold: 0.15,
     cost: { city: 300, factory: 450, port: 350, def: 200, silo: 1200, sam: 900, airport: 800 },
@@ -537,7 +537,7 @@ h2 { font-size: 34px; }
     bhp: { city: 8, factory: 6, port: 8, def: 6, silo: 10, sam: 6, airport: 8 },
     raidCost: 250, raidDmg: 5, raidSpeed: 1.6, raidRange: 130, raidSam: 0.45, vGold: 1, vTroop: 0.15, vTile: 5, winShare: 0.8,
     boatSpeed: 0.8, maxBoats: 3, focusDist: 0.5, fillW: 1.7, focusShare: 0,
-    growMul: 1.5, growRoom: 0.0007, botGrow: 0.45, circFill: 0.2, circNoise: 0.25
+    growMul: 2.0, growRoom: 0.0012, botGrow: 0.55, circFill: 0.8, circNoise: 0.06
   };
   /* Profils de difficulté des bots : grow = multiplicateur de troupes, think = délai de réflexion,
      aggr = [min,max], inc = revenu, bld = fréquence de construction, nuke = fréquence des bombes */
@@ -977,10 +977,18 @@ h2 { font-size: 34px; }
       if (this.tick >= s.think) {
         s.think = this.tick + 15; s.tx = -1;
         var bd = 60 * 60 + 1, dx, dy, dd;
+        // Priorité aux navires ennemis, puis aux bateaux de débarquement qui menacent nos côtes.
         for (k = 0; k < this.ships.length; k++) {
           o = this.ships[k]; if (o.owner === s.owner || this.allied(s.owner, o.owner)) continue;
           dx = o.x - s.x; dy = o.y - s.y; dd = dx * dx + dy * dy;
           if (dd < bd) { bd = dd; s.tx = o.x; s.ty = o.y; }
+        }
+        for (k = 0; k < this.boats.length; k++) {
+          var intercept = this.boats[k];
+          if (intercept.owner === s.owner || this.allied(s.owner, intercept.owner)) continue;
+          dx = intercept.x - s.x; dy = intercept.y - s.y; dd = dx * dx + dy * dy;
+          // Les bateaux d'invasion sont prioritaires s'ils approchent davantage que les cibles navales actuelles.
+          if (dd < bd * 1.15) { bd = dd; s.tx = intercept.x; s.ty = intercept.y; }
         }
         if (s.tx < 0) {
           bd = 1e9;
