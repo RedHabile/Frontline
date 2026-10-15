@@ -3120,6 +3120,7 @@ h2 { font-size: 34px; }
 
   function setPaused(v, fromNetwork) {
     st.paused = v;
+    if (!fromNetwork && lfSocket && lfRoomCode) lfSendRoomMessage({ type: 'pause', paused: !!v, reason: 'manual' });
     $('icPause').innerHTML = v ? '<path d="M7 5l12 7-12 7z"/>' : '<path d="M8 5v14M16 5v14"/>';
     $('bPause').setAttribute('aria-label', v ? 'Reprendre' : 'Pause');
     $('paused').hidden = !(v && st.phase === 'play');
@@ -3227,7 +3228,7 @@ h2 { font-size: 34px; }
   $('attacks').addEventListener('click', function (e) {
     var b = e.target.closest('button'); if (b && st.sim) st.sim.cancelAttack(parseInt(b.dataset.id, 10));
   });
-  $('bPause').addEventListener('click', function () { if (st.phase === 'play') { var next = !st.paused; setPaused(next); lfSendRoomMessage({ type: 'pause', paused: next, reason: 'manual' }); } });
+  $('bPause').addEventListener('click', function () { if (st.phase === 'play') setPaused(!st.paused); });
   $('bSpeed').addEventListener('click', function () {
     st.speed = st.speed === 1 ? 2 : (st.speed === 2 ? 4 : (st.speed === 4 ? 8 : 1)); this.textContent = st.speed + '×';
   });
@@ -3290,6 +3291,7 @@ h2 { font-size: 34px; }
 
   /* ---------- Connexion aux salons privés multijoueurs ---------- */
   var lfSocket = null, lfRoomCode = '', lfPlayerId = '', lfRoomHost = false, lfRoomPlayers = [];
+  var lfHostTick = null, lfHostPaused = false, lfSyncSendAt = 0, lfPauseByVisibility = false, lfPauseWasActive = false;
   function lfSendRoomMessage(message) {
     if (!lfSocket || !lfRoomCode || lfSocket.readyState !== WebSocket.OPEN) return false;
     try { lfSocket.send(JSON.stringify(message)); return true; } catch (e) { return false; }
@@ -3351,8 +3353,14 @@ h2 { font-size: 34px; }
         lfRoomPlayers = msg.players || lfRoomPlayers; lfRenderRoom();
       } else if (msg.type === 'host-left') {
         lfSetRoomStatus('L’hôte a quitté le salon.', true); lfDisconnectRoom(true);
+      } else if (msg.type === 'sync' && msg.from !== lfPlayerId && st.sim && st.phase === 'play') {
+        lfHostTick = Number.isFinite(msg.tick) ? msg.tick : lfHostTick;
+        lfHostPaused = !!msg.paused;
+        if (st.paused !== lfHostPaused) setPaused(lfHostPaused, true);
+        if (Number.isFinite(msg.speed) && msg.speed > 0) st.speed = msg.speed;
       } else if (msg.type === 'pause' && msg.from !== lfPlayerId && st.sim && st.phase === 'play') {
-        setPaused(!!msg.paused, true);
+        lfHostPaused = !!msg.paused;
+        setPaused(lfHostPaused, true);
         toast(msg.paused ? 'Partie mise en pause par un joueur.' : 'La partie reprend.');
       } else if (msg.type === 'diplomacy-offer' && msg.from !== lfPlayerId && msg.kind === 'alliance' && msg.targetNetId === lfPlayerId && st.sim && st.phase === 'play') {
         var proposer = lfFindNetPlayer(msg.from), localHuman = st.sim.human;
@@ -3440,6 +3448,16 @@ h2 { font-size: 34px; }
       lfRoomDetails.appendChild(start);
     }
   }
+  document.addEventListener('visibilitychange', function () {
+    if (!lfSocket || !lfRoomCode || st.phase !== 'play') return;
+    if (document.hidden) {
+      lfPauseWasActive = !st.paused; lfPauseByVisibility = true;
+      setPaused(true); toast('Pause automatique : un joueur a quitté l’onglet.');
+    } else if (lfPauseByVisibility && lfPauseWasActive) {
+      lfPauseByVisibility = false; lfPauseWasActive = false;
+      setPaused(false); toast('Reprise : le joueur est revenu.');
+    }
+  });
   $('lfCreateRoom').addEventListener('click', function(){lfConnectRoom('create');});
   $('lfJoinRoom').addEventListener('click', function(){lfConnectRoom('join');});
   $('lfLeaveRoom').addEventListener('click', function(){lfDisconnectRoom(false);});
@@ -3451,9 +3469,23 @@ h2 { font-size: 34px; }
     var dt = Math.min(100, ts - last); last = ts;
     var sim = st.sim;
     if (sim && st.phase === 'play' && !st.paused && !sim.halted) {
-      acc += dt * st.speed; var n = 0;
-      while (acc >= 100 && n < 8) { sim.step(); acc -= 100; n++; }
-      if (n === 8) acc = 0;
+      // Les clients suivent l'horloge de l'hôte : rattrapage borné si l'onglet a été ralenti.
+      var lag = (!lfRoomHost && lfSocket && lfHostTick !== null) ? (lfHostTick - sim.tick) : 0;
+      if (!lfRoomHost && lfSocket && lfHostPaused) { acc = 0; }
+      else {
+        acc += dt * st.speed; var n = 0;
+        while (acc >= 100 && n < 8) { sim.step(); acc -= 100; n++; }
+        if (n === 8) acc = 0;
+        if (lag > 2) {
+          var catchUp = Math.min(12, Math.max(0, Math.floor(lag)));
+          for (var ci = 0; ci < catchUp; ci++) sim.step();
+          acc = 0;
+        } else if (lag < -2) { acc = Math.min(acc, 20); }
+      }
+    }
+    if (lfSocket && lfRoomCode && st.phase === 'play' && lfRoomHost && ts - lfSyncSendAt > 400) {
+      lfSyncSendAt = ts;
+      lfSendRoomMessage({ type: 'sync', tick: sim ? sim.tick : 0, paused: !!st.paused, speed: st.speed });
     }
     if (sim && sim.track && sim.changed.length) { Pt.paintChanged(sim, st.bg, px); dirty = true; }
     if (dirty) { flush(); dirty = false; }
