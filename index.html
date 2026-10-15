@@ -963,8 +963,12 @@ h2 { font-size: 34px; }
     var ports = [], k;
     for (k = 0; k < this.buildings.length; k++) if (this.buildings[k].type === 'port' && this.buildings[k].owner === pid) ports.push(this.buildings[k]);
     var port = null;
-    if (Number.isInteger(portTile)) for (k = 0; k < ports.length; k++) if (ports[k].tile === portTile) { port = ports[k]; break; }
-    if (!port) port = ports[(this.rng() * ports.length) | 0];
+    if (Number.isInteger(portTile)) {
+      for (k = 0; k < ports.length; k++) if (ports[k].tile === portTile) { port = ports[k]; break; }
+      if (!port) return { ok: false, reason: 'port' };
+    } else {
+      port = ports[(this.rng() * ports.length) | 0];
+    }
     var sea = this._seaNear(port.tile);
     if (sea < 0) return { ok: false, reason: 'sea' };
     p.gold -= c;
@@ -2497,8 +2501,24 @@ h2 { font-size: 34px; }
       ctx.lineWidth = Math.max(1.3, sr * 0.24); ctx.strokeStyle = 'rgba(6,14,22,0.96)';
       ctx.beginPath(); ctx.moveTo(sr * 1.75, 0); ctx.lineTo(sr * 0.35, -sr * 0.8); ctx.lineTo(-sr * 1.35, -sr * 0.68); ctx.lineTo(-sr * 1.35, sr * 0.68); ctx.lineTo(sr * 0.35, sr * 0.8); ctx.closePath();
       ctx.fillStyle = tc; ctx.fill(); ctx.stroke();
-      if (sh.type === 'carrier') { ctx.fillStyle = '#f5f0df'; ctx.fillRect(-sr * 1.15, -sr * 0.48, sr * 2.0, sr * 0.96); ctx.fillStyle = '#303e4a'; for (var ci = 0; ci < 3; ci++) ctx.fillRect(-sr * 0.75 + ci * sr * 0.55, -sr * 0.22, sr * 0.32, sr * 0.44); }
-      else if (sh.type === 'sub') { ctx.fillStyle = '#293843'; ctx.beginPath(); ctx.ellipse(0, 0, sr * 1.45, sr * 0.43, 0, 0, 6.2832); ctx.fill(); ctx.fillStyle = '#b8c8d2'; ctx.fillRect(-sr * 0.2, -sr * 0.55, sr * 0.48, sr * 0.35); }
+      if (sh.type === 'carrier') {
+        ctx.fillStyle = '#f5f0df'; ctx.fillRect(-sr * 1.15, -sr * 0.48, sr * 2.0, sr * 0.96);
+        ctx.fillStyle = '#303e4a'; for (var ci = 0; ci < 3; ci++) ctx.fillRect(-sr * 0.75 + ci * sr * 0.55, -sr * 0.22, sr * 0.32, sr * 0.44);
+        ctx.strokeStyle = '#f2b13c'; ctx.lineWidth = Math.max(0.8, sr * 0.12); ctx.beginPath(); ctx.moveTo(-sr * 0.8, 0); ctx.lineTo(sr * 0.65, 0); ctx.stroke();
+      } else if (sh.type === 'sub') {
+        ctx.fillStyle = '#18232d'; ctx.beginPath(); ctx.ellipse(0, 0, sr * 1.45, sr * 0.43, 0, 0, 6.2832); ctx.fill();
+        ctx.fillStyle = '#d9e5ec'; ctx.fillRect(-sr * 0.2, -sr * 0.55, sr * 0.48, sr * 0.35);
+        if (sr >= 5) { ctx.fillStyle = '#ffffff'; ctx.font = 'bold ' + Math.max(5, sr * 0.8) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('S', 0, 0); }
+      } else if (sh.type === 'destroyer') {
+        ctx.fillStyle = '#e9f3f8';
+        ctx.beginPath(); ctx.arc(sr * 0.62, 0, sr * 0.25, 0, 6.2832); ctx.fill();
+        ctx.beginPath(); ctx.arc(-sr * 0.35, 0, sr * 0.22, 0, 6.2832); ctx.fill();
+        ctx.strokeStyle = '#172838'; ctx.lineWidth = Math.max(1, sr * 0.16);
+        ctx.beginPath(); ctx.moveTo(sr * 0.62, -sr * 0.4); ctx.lineTo(sr * 0.62, sr * 0.4); ctx.moveTo(sr * 0.25, 0); ctx.lineTo(sr * 0.98, 0); ctx.stroke();
+      } else {
+        ctx.fillStyle = '#f3f6f8'; ctx.beginPath(); ctx.arc(sr * 0.4, 0, sr * 0.28, 0, 6.2832); ctx.fill();
+        ctx.strokeStyle = '#172838'; ctx.lineWidth = Math.max(1, sr * 0.14); ctx.beginPath(); ctx.moveTo(sr * 0.4, -sr * 0.38); ctx.lineTo(sr * 0.4, sr * 0.38); ctx.stroke();
+      }
       ctx.fillStyle = 'rgba(241,246,250,0.94)'; ctx.beginPath(); ctx.moveTo(sr * 1.15, 0); ctx.lineTo(sr * 0.25, -sr * 0.46); ctx.lineTo(-sr * 1.0, -sr * 0.4); ctx.lineTo(-sr * 1.0, sr * 0.4); ctx.lineTo(sr * 0.25, sr * 0.46); ctx.closePath(); ctx.fill();
       if (sr >= 5) {
         ctx.strokeStyle = '#142230'; ctx.lineWidth = Math.max(1, sr * 0.14); ctx.beginPath(); ctx.moveTo(sr * 0.4, 0); ctx.lineTo(sr * 1.05, 0); ctx.stroke();
@@ -2819,23 +2839,7 @@ h2 { font-size: 34px; }
     if (o === h.id) {
       if (clickedPort) add('ships', 'Choisir un bateau', ITEM.ship.svg, function(){ rad.level = 'ships'; drawRadial(); });
       add('build', 'Bâtir', ICON.build, function () { rad.level = 'build'; drawRadial(); });
-      var sb = ITEM.ship, sc = costOf('ship'), shl = techNeeded('ship');
-      add('ship', 'Navire', sb.svg, function () {
-        if (shl) { techLock('ship')(); return; }
-        if (h.count.port < 1) { toast(MSGB.port); return; }
-        var r = sim.buildShip(h.id, 'ship');
-        if (r.ok) { lfBroadcastAction({ kind: 'shipBuild', vessel: 'ship' }); toast('Navire de guerre mis à l’eau.'); closeRadial(); updateHud(); } else toast(MSGB[r.reason] || MSGB.invalid);
-      }, shl ? null : sc, shl || h.count.port < 1 ? 'off' : (h.gold < sc ? 'poor' : ''), null, shl);
-      ['carrier','sub'].forEach(function (vt) {
-        var vi = ITEM[vt], vc = costOf(vt), vl = techNeeded(vt);
-        add(vt, vi.name, vi.svg, function () {
-          if (vl) { techLock(vt)(); return; }
-          if (h.count.port < 1) { toast(MSGB.port); return; }
-          var vr = sim.buildShip(h.id, vt);
-          if (vr.ok) { lfBroadcastAction({ kind: 'shipBuild', vessel: vt }); toast(vi.name + ' mis à l’eau.'); closeRadial(); updateHud(); }
-          else toast(MSGB[vr.reason] || MSGB.invalid);
-        }, vl ? null : vc, vl || h.count.port < 1 ? 'off' : (h.gold < vc ? 'poor' : ''), null, vl);
-      });
+      // Les navires ne se construisent que depuis le sous-menu d'un port précis.
       add('dip', 'Diplomatie', ICON.diplo, function () { closeRadial(); openDip(0); });
       return items;
     }
