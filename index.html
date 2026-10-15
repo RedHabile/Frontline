@@ -545,7 +545,7 @@ h2 { font-size: 34px; }
     subCost: 1450, subHp: 24, subSpeed: 0.58, subRange: 6, subDmg: 1.05, subShot: 22,
     bhp: { city: 8, factory: 6, port: 8, def: 6, silo: 10, sam: 6, airport: 8 },
     raidCost: 250, raidDmg: 5, raidSpeed: 1.6, raidRange: 130, raidSam: 0.45, vGold: 1, vTroop: 0.15, vTile: 5, winShare: 0.8,
-    boatSpeed: 0.8, maxBoats: 3, focusDist: 0.5, fillW: 1.7, focusShare: 0.32,
+    boatSpeed: 0.8, maxBoats: 3, focusDist: 1.65, fillW: 0.95, focusShare: 0.82,
     growMul: 2.0, growRoom: 0.0012, botGrow: 0.55, circFill: 0.8, circNoise: 0.06
   };
   /* Profils de difficulté des bots : grow = multiplicateur de troupes, think = délai de réflexion,
@@ -760,10 +760,12 @@ h2 { font-size: 34px; }
         return Math.sqrt(ox * ox + oy * oy) + (4 - this._friendly(i, a.owner)) * P.circFill + this.rng() * P.circNoise;
       }
     }
-    var pri = (4 - this._friendly(i, a.owner)) * P.fillW + this.rng() * 0.9;
-    if (withFocus && a.fx >= 0) {
+    var pri = (4 - this._friendly(i, a.owner)) * P.fillW + this.rng() * 0.18;
+    if (a.fx >= 0) {
       var dx = (i % W) - a.fx, dy = ((i / W) | 0) - a.fy;
-      pri += Math.sqrt(dx * dx + dy * dy) * P.focusDist;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      pri += dist * P.focusDist * (withFocus ? 1 : 0.72);
+      if (withFocus && dist < 4) pri -= (4 - dist) * 1.25;
     }
     return pri;
   };
@@ -935,7 +937,7 @@ h2 { font-size: 34px; }
     }
     return best;
   };
-  Sim.prototype.buildShip = function (pid, vesselType) {
+  Sim.prototype.buildShip = function (pid, vesselType, portTile) {
     vesselType = vesselType || 'ship';
     if (['ship', 'carrier', 'sub'].indexOf(vesselType) < 0) vesselType = 'ship';
     var p = this.players[pid];
@@ -948,7 +950,10 @@ h2 { font-size: 34px; }
     if (owned >= cap) return { ok: false, reason: 'boats' };
     var ports = [], k;
     for (k = 0; k < this.buildings.length; k++) if (this.buildings[k].type === 'port' && this.buildings[k].owner === pid) ports.push(this.buildings[k]);
-    var port = ports[(this.rng() * ports.length) | 0], sea = this._seaNear(port.tile);
+    var port = null;
+    if (Number.isInteger(portTile)) for (k = 0; k < ports.length; k++) if (ports[k].tile === portTile) { port = ports[k]; break; }
+    if (!port) port = ports[(this.rng() * ports.length) | 0];
+    var sea = this._seaNear(port.tile);
     if (sea < 0) return { ok: false, reason: 'sea' };
     p.gold -= c;
     var s = { id: this.nextBid++, type: vesselType, owner: pid, x: (sea % W) + 0.5, y: ((sea / W) | 0) + 0.5, hp: vesselType === 'carrier' ? P.carrierHp : (vesselType === 'sub' ? P.subHp : P.shipHp), home: port.tile, tx: -1, ty: -1, think: 0, shot: 0, ang: 0, path: null, pi: 0, gkey: '', replan: 0, firing: null };
@@ -1018,8 +1023,8 @@ h2 { font-size: 34px; }
       var gx = s.tx, gy = s.ty;
       if (gx < 0) { gx = (s.home % W) + 0.5; gy = ((s.home / W) | 0) + 0.5; }
       var vesselSpeed = s.type === 'carrier' ? P.carrierSpeed : (s.type === 'sub' ? P.subSpeed : P.shipSpeed);
-      if (s.type === 'ship') { for (k = 0; k < this.ships.length; k++) { var cv = this.ships[k]; if (cv.type === 'carrier' && cv.owner === s.owner && (cv.x-s.x)*(cv.x-s.x)+(cv.y-s.y)*(cv.y-s.y) < 18*18) { vesselRange += 2; break; } } }
       var vesselRange = s.type === 'carrier' ? P.carrierRange : (s.type === 'sub' ? P.subRange : P.shipRange);
+      if (s.type === 'ship') { for (k = 0; k < this.ships.length; k++) { var cv = this.ships[k]; if (cv.type === 'carrier' && cv.owner === s.owner && (cv.x-s.x)*(cv.x-s.x)+(cv.y-s.y)*(cv.y-s.y) < 18*18) { vesselRange += 2; break; } } }
       var vesselDmg = s.type === 'sub' ? P.subDmg : P.shipDmg;
       var vesselShot = s.type === 'carrier' ? P.carrierShot : (s.type === 'sub' ? P.subShot : P.shipShot);
       var key = Math.round(gx / 3) + ',' + Math.round(gy / 3);
@@ -2517,9 +2522,20 @@ h2 { font-size: 34px; }
   function doBuild(k, t) {
     var sim = st.sim, h = sim.human, b = ITEM[k], res;
     if (b.kind === 'place') {
-      res = sim.build(h.id, k, t);
+      var buildTile = t;
+      res = sim.build(h.id, k, buildTile);
+      // Tolérance au clic : si une case est occupée, trouver la case libre la plus proche.
+      if (!res.ok && ['near','land','coast'].indexOf(res.reason) >= 0 && sim.owner[t] === h.id) {
+        var tx = t % W, ty = (t / W) | 0, candidates = [];
+        for (var by = Math.max(0, ty - 5); by <= Math.min(H - 1, ty + 5); by++) for (var bx = Math.max(0, tx - 5); bx <= Math.min(W - 1, tx + 5); bx++) {
+          var bt = by * W + bx, dd = (bx - tx) * (bx - tx) + (by - ty) * (by - ty);
+          if (dd && dd <= 25 && sim.owner[bt] === h.id && sim.terrain[bt] > 0) candidates.push({tile:bt,d:dd});
+        }
+        candidates.sort(function(a,b){return a.d-b.d;});
+        for (var ci = 0; ci < candidates.length; ci++) { res = sim.build(h.id, k, candidates[ci].tile); if (res.ok) { buildTile = candidates[ci].tile; break; } }
+      }
       if (!res.ok) { toast(res.reason === 'tech' ? 'Recherche requise : ' + TBY[res.tech].name + '.' : (MSGB[res.reason] || MSGB.invalid)); return false; }
-      lfBroadcastAction({ kind: 'build', item: k, target: t });
+      lfBroadcastAction({ kind: 'build', item: k, target: buildTile });
       toast(BNAME[k] + ' construit' + (BNAME_F[k] ? 'e' : '') + '.'); return true;
     }
     if (b.kind === 'bomb') {
@@ -2539,6 +2555,7 @@ h2 { font-size: 34px; }
 
   function radialItems() {
     var sim = st.sim, h = sim.human, t = rad.tile, o = sim.owner[t], items = [];
+    var clickedBuilding = sim.bmap && sim.bmap.get(t), clickedPort = clickedBuilding && clickedBuilding.type === 'port' && clickedBuilding.owner === h.id;
     function add(id, label, svg, run, cost, state, pv, lock) { items.push({ id: id, label: label, svg: svg, run: run, cost: cost, state: state || '', pv: pv, lock: lock }); }
     function lockOf(b) { return b.req && h.count[b.req] < 1; }
     function techLock(k) { var nt = techNeeded(k); return nt ? function () { toast('Recherche requise : ' + TBY[nt].name + '.'); closeRadial(); openRes(nt); } : null; }
@@ -2554,11 +2571,26 @@ h2 { font-size: 34px; }
       BUILD.forEach(function (b) { if (b.kind === 'place') itemFor(b); });
       return items;
     }
+    if (rad.level === 'ships') {
+      ['ship','carrier','sub'].forEach(function(vt){
+        var vi = ITEM[vt], vc = costOf(vt), vl = techNeeded(vt), owned = 0;
+        for (var si = 0; si < sim.ships.length; si++) if (sim.ships[si].owner === h.id && sim.ships[si].type === vt) owned++;
+        var cap = vt === 'carrier' ? 2 : (vt === 'sub' ? 4 : 6), blocked = vl || h.gold < vc || owned >= cap;
+        add(vt, vi.name, vi.svg, function(){
+          if (vl) { techLock(vt)(); return; }
+          var vr = sim.buildShip(h.id, vt, t);
+          if (vr.ok) { lfBroadcastAction({kind:'shipBuild',vessel:vt,portTile:t}); toast(vi.name + ' lancé depuis ce port.'); closeRadial(); updateHud(); }
+          else toast(MSGB[vr.reason] || MSGB.invalid);
+        }, vc, blocked ? 'off' : '', null, vl);
+      });
+      return items;
+    }
     if (rad.level === 'bomb') {
       BUILD.forEach(function (b) { if (b.kind === 'bomb') itemFor(b); });
       return items;
     }
     if (o === h.id) {
+      if (clickedPort) add('ships', 'Choisir un bateau', ITEM.ship.svg, function(){ rad.level = 'ships'; drawRadial(); });
       add('build', 'Bâtir', ICON.build, function () { rad.level = 'build'; drawRadial(); });
       var sb = ITEM.ship, sc = costOf('ship'), shl = techNeeded('ship');
       add('ship', 'Navire', sb.svg, function () {
@@ -3476,7 +3508,7 @@ h2 { font-size: 34px; }
       else if (action.kind === 'build') sim.build(player.id, action.item, action.target);
       else if (action.kind === 'bomb') sim.launchBomb(player.id, action.item, action.target);
       else if (action.kind === 'raid') sim.launchRaid(player.id, action.target);
-      else if (action.kind === 'shipBuild' && ['ship','carrier','sub'].indexOf(action.vessel) >= 0) sim.buildShip(player.id, action.vessel);
+      else if (action.kind === 'shipBuild' && ['ship','carrier','sub'].indexOf(action.vessel) >= 0) sim.buildShip(player.id, action.vessel, Number.isInteger(action.portTile) ? action.portTile : undefined);
     } catch (e) { console.warn('Action réseau ignorée', e); }
   }
 
