@@ -535,8 +535,8 @@ h2 { font-size: 34px; }
     neutralCost: 8.5, defMul: 1.45, defBase: 2, defLoss: 0.3, speedDiv: 17, speedCap: 45, startTroops: 1800,
     goldBase: 0.1, goldTile: 0.0015, startGold: 200,
     cityTroops: 3000, factoryGold: 0.35, portGold: 0.15,
-    cost: { city: 300, factory: 450, port: 350, def: 200, silo: 1200, sam: 900, airport: 800, tank: 950, artillery: 700 },
-    grow: { city: 0.4, factory: 0.4, port: 0.4, def: 0.4, silo: 0.25, sam: 0.25, airport: 0.3, tank: 0.35, artillery: 0.3 },
+    cost: { city: 300, factory: 450, port: 350, def: 200, silo: 1200, sam: 900, airport: 800 },
+    grow: { city: 0.4, factory: 0.4, port: 0.4, def: 0.4, silo: 0.25, sam: 0.25, airport: 0.3 },
     defRadius: 14, defAtk: 1.8, defDef: 0.6, minBuildDist: 3,
     samRadius: 34, samChance: 0.75,
     bomb: { atom: { cost: 900, inner: 9, outer: 16 }, hydro: { cost: 4500, inner: 18, outer: 32 }, mirv: { cost: 20000, inner: 5, outer: 10, warheads: 9, spread: 22 } }, bombSpeed: 2.2,
@@ -544,7 +544,7 @@ h2 { font-size: 34px; }
     destroyerCost: 1800, destroyerHp: 75, destroyerSpeed: 0.58, destroyerRange: 11, destroyerDmg: 1.15, destroyerShot: 24, subDetectRange: 30,
     carrierCost: 2600, carrierHp: 125, carrierSpeed: 0.34, carrierRange: 9, carrierShot: 60,
     subCost: 1450, subHp: 24, subSpeed: 0.72, subRange: 6, subDmg: 1.25, subShot: 22,
-    bhp: { city: 8, factory: 6, port: 8, def: 6, silo: 10, sam: 6, airport: 8, tank: 9, artillery: 7 },
+    bhp: { city: 8, factory: 6, port: 8, def: 6, silo: 10, sam: 6, airport: 8 },
     raidCost: 250, raidDmg: 5, raidSpeed: 1.6, raidRange: 130, raidSam: 0.45, vGold: 1, vTroop: 0.15, vTile: 5, winShare: 0.8,
     boatSpeed: 0.8, maxBoats: 3, focusDist: 2.7, fillW: 1.35, focusShare: 0.88,
     growMul: 2.0, growRoom: 0.0012, botGrow: 0.55, circFill: 0.8, circNoise: 0.025
@@ -577,7 +577,7 @@ h2 { font-size: 34px; }
     { k: 'dBomb', name: 'Charges lourdes', desc: '+10 % de rayon des bombes, par niveau', max: 3, cost: [1500, 3000, 6000], time: [600, 800, 1000], req: ['rocket'], up: true }
   ];
   var TECH_BY = {}; TECH.forEach(function (t) { TECH_BY[t.k] = t; });
-  var BUILD_TECH = { factory: 'eco', port: 'naval', def: 'defense', airport: 'air', sam: 'sam', tank: 'eco', artillery: 'defense' };
+  var BUILD_TECH = { factory: 'eco', port: 'naval', def: 'defense', airport: 'air', sam: 'sam' };
   var BOMB_TECH = { atom: 'rocket', hydro: 'hydro', mirv: 'mirv' };
   function tl(p, k) { return (p && p.tech && p.tech[k]) || 0; }
   var LEVEL_KEYS = { easy: 0, normal: 1, hard: 2, brutal: 3 };
@@ -586,7 +586,7 @@ h2 { font-size: 34px; }
     var r = rng();                      // 'mixed' : des nuls et des monstres dans la même partie
     return r < 0.3 ? 0 : r < 0.55 ? 1 : r < 0.8 ? 2 : 3;
   }
-  function maxTroops(p) { return P.maxBase + p.tiles * P.maxTile + p.count.city * P.cityTroops * (1 + 0.25 * tl(p, 'yBase')) + p.count.tank * 1800; }
+  function maxTroops(p) { return P.maxBase + p.tiles * P.maxTile + p.count.city * P.cityTroops * (1 + 0.25 * tl(p, 'yBase')) ; }
 
   /* ---------- Simulation ---------- */
   function Sim(opts) {
@@ -644,7 +644,7 @@ h2 { font-size: 34px; }
   Sim.prototype.addPlayer = function (name, color, bot) {
     var p = {
       id: this.players.length, name: name, color: color, bot: bot, tiles: 0, sx: 0, sy: 0, peak: 0,
-      troops: 0, gold: P.startGold, count: { city: 0, factory: 0, port: 0, def: 0, silo: 0, sam: 0, airport: 0, tank: 0, artillery: 0 }, defs: [], sams: [],
+      troops: 0, gold: P.startGold, count: { city: 0, factory: 0, port: 0, def: 0, silo: 0, sam: 0, airport: 0 }, defs: [], sams: [],
       tech: {}, research: null, allies: new Set(), refused: {}, lastHit: {}, traitor: -99999, isolated: false,
       border: new Set(), alive: true, spawned: false, aggr: 0.6, level: 1, skill: null, nextThink: 0, label: null, spawnX: -999, spawnY: -999
     };
@@ -837,9 +837,7 @@ h2 { font-size: 34px; }
     var type = null, underAttack = false, k;
     for (k = 0; k < this.attacks.length; k++) if (this.attacks[k].active && this.attacks[k].target === p.id) { underAttack = true; break; }
     var r = this.rng();
-    if (tl(p, 'eco') && p.count.tank < 1 + p.tiles / 450 && p.gold >= this.cost(p, 'tank') && r < 0.14) type = 'tank';
-    else if (tl(p, 'defense') && p.count.artillery < 1 + p.tiles / 500 && p.gold >= this.cost(p, 'artillery') && r < 0.12) type = 'artillery';
-    else if (p.count.city < 1 + p.tiles / 150 && p.gold >= this.cost(p, 'city')) type = 'city';
+    if (p.count.city < 1 + p.tiles / 150 && p.gold >= this.cost(p, 'city')) type = 'city';
     else if (underAttack && tl(p, 'defense') && p.count.def < 4 && p.gold >= this.cost(p, 'def') && r < 0.5) type = 'def';
     else if (tl(p, 'eco') && p.count.factory < 1 + p.tiles / 300 && p.gold >= this.cost(p, 'factory') && r < 0.4) type = 'factory';
     else if (tl(p, 'sam') && p.count.sam < 1 + p.tiles / 500 && p.tiles > 250 && p.gold >= this.cost(p, 'sam') && r < 0.15) type = 'sam';
@@ -1384,8 +1382,6 @@ h2 { font-size: 34px; }
     var ratioBoost = Math.pow(Math.max(0.15, ratio), 0.72);
     var stackBoost = Math.pow(Math.max(0.25, a.troops / 1800), 0.22);
     var speed = 1.15 + 1.65 * ratioBoost * stackBoost;
-    // Prototype blindes et artillerie : renforce la progression des offensives.
-    speed *= 1 + Math.min(0.35, (this.players[a.owner].count.tank || 0) * 0.07) + Math.min(0.25, (this.players[a.owner].count.artillery || 0) * 0.05);
     // Les grosses armées avancent sensiblement plus vite que les petits détachements.
     speed *= Math.min(1.8, 0.85 + Math.sqrt(Math.max(0, a.troops) / 1200) * 0.22);
     var nearFocus = false;
@@ -2280,8 +2276,6 @@ h2 { font-size: 34px; }
     { k: 'factory', kind: 'place', name: 'Usine', desc: '+' + nf(P.factoryGold * 10) + ' or par seconde', svg: Art.icon('factory') },
     { k: 'port', kind: 'place', name: 'Port', desc: 'Côte · bateaux', svg: Art.icon('port') },
     { k: 'airport', kind: 'place', name: 'Aéroport', desc: 'Raids aériens', svg: Art.icon('airport') },
-    { k: 'tank', kind: 'place', name: 'Base blindée', desc: '+1 800 troupes max et offensives plus rapides', svg: Art.icon('city') },
-    { k: 'artillery', kind: 'place', name: 'Batterie d’artillerie', desc: 'Soutient les offensives et accélère les conquêtes', svg: Art.icon('def') },
     { k: 'def', kind: 'place', name: 'Défense', desc: 'Attaques plus coûteuses', svg: Art.icon('def') },
     { k: 'sam', kind: 'place', name: 'SAM', desc: 'Intercepte bombes et avions', svg: Art.icon('sam') },
     { k: 'ship', kind: 'ship', req: 'port', name: 'Navire', desc: 'Navire de guerre', svg: Art.icon('ship') },
@@ -2310,8 +2304,8 @@ h2 { font-size: 34px; }
     nobuild: 'Aucun bâtiment ennemi à cet endroit : visez-en un.', range: 'Aucun de vos aéroports n’est à portée (' + P.raidRange + ' cases).',
     ally: 'Cette nation est votre alliée.', tech: 'Recherche requise.'
   };
-  var BNAME = { city: 'Base', factory: 'Usine', port: 'Port', def: 'Défense', silo: 'Silo', sam: 'Lanceur SAM', airport: 'Aéroport', tank: 'Base blindée', artillery: 'Batterie d’artillerie' };
-  var BNAME_F = { city: 1, factory: 1, tank: 1, artillery: 1 };
+  var BNAME = { city: 'Base', factory: 'Usine', port: 'Port', def: 'Défense', silo: 'Silo', sam: 'Lanceur SAM', airport: 'Aéroport' };
+  var BNAME_F = { city: 1, factory: 1 };
   var BOMBNAME = { atom: 'une bombe atomique', hydro: 'une bombe à hydrogène', mirv: 'un MIRV' };
   var $ = function (id) { return document.getElementById(id); };
 
