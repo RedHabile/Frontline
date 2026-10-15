@@ -2949,10 +2949,17 @@ h2 { font-size: 34px; }
           bt.appendChild(dbtn('Rompre l’alliance', 'ghost', function () { sim.breakAlliance(h.id, q.id, false); toast('Alliance rompue avec ' + q.name + '.'); dipSig = ''; renderDip(); }));
         } else {
           bt.appendChild(dbtn('Alliance', 'ghost', function () {
-            var r = sim.proposeAlliance(h.id, q.id);
-            if (r.accepted) toast(q.name + ' accepte l’alliance.');
-            else if (r.ok) toast(q.name + ' refuse l’alliance.');
-            else toast('Alliance impossible.');
+            if (q.netId && lfSocket && lfRoomCode) {
+              lfSendRoomMessage({ type: 'pause', paused: true, reason: 'alliance' });
+              lfSendRoomMessage({ type: 'diplomacy-offer', kind: 'alliance', targetNetId: q.netId });
+              setPaused(true); toast('Proposition d’alliance envoyée à ' + q.name + '. En attente de sa réponse.');
+            } else {
+              var r = sim.proposeAlliance(h.id, q.id);
+              if (r.accepted) toast(q.name + ' accepte l’alliance.');
+              else if (r.pending) { setPaused(true); toast('Proposition envoyée à ' + q.name + '.'); }
+              else if (r.ok) toast(q.name + ' refuse l’alliance.');
+              else toast('Alliance impossible.');
+            }
             dipSig = ''; renderDip();
           }));
           bt.appendChild(dbtn('Guerre', 'ghost warb', function () {
@@ -3082,7 +3089,9 @@ h2 { font-size: 34px; }
   function closeOffer() { curOffer = null; $('offer').hidden = true; st.hl = null; hold('offer', false); }
   function answer(accept) {
     if (!curOffer) return;
-    var sim = st.sim, q = sim.players[curOffer.from], r = sim.answerOffer(curOffer.id, accept);
+    var sim = st.sim, q = sim.players[curOffer.from], answeredOffer = curOffer, r = sim.answerOffer(curOffer.id, accept);
+    if (answeredOffer.kind === 'alliance' && q && q.netId) lfSendRoomMessage({ type: 'diplomacy-answer', targetNetId: q.netId, kind: 'alliance', accept: !!accept });
+    lfSendRoomMessage({ type: 'pause', paused: false, reason: 'offer-answer' });
     if (accept) {
       if (r.ok && r.done) toast(curOffer.kind === 'alliance' ? 'Alliance conclue avec ' + q.name + '.' : 'Échange conclu avec ' + q.name + '.');
       else toast('Vous n’avez plus les ressources nécessaires.');
@@ -3107,7 +3116,7 @@ h2 { font-size: 34px; }
     $('po').textContent = v + ' %' + (h && st.phase === 'play' ? ' · ' + fmt(h.troops * v / 100) : '');
   }
 
-  function setPaused(v) {
+  function setPaused(v, fromNetwork) {
     st.paused = v;
     $('icPause').innerHTML = v ? '<path d="M7 5l12 7-12 7z"/>' : '<path d="M8 5v14M16 5v14"/>';
     $('bPause').setAttribute('aria-label', v ? 'Reprendre' : 'Pause');
@@ -3216,7 +3225,7 @@ h2 { font-size: 34px; }
   $('attacks').addEventListener('click', function (e) {
     var b = e.target.closest('button'); if (b && st.sim) st.sim.cancelAttack(parseInt(b.dataset.id, 10));
   });
-  $('bPause').addEventListener('click', function () { if (st.phase === 'play') setPaused(!st.paused); });
+  $('bPause').addEventListener('click', function () { if (st.phase === 'play') { var next = !st.paused; setPaused(next); lfSendRoomMessage({ type: 'pause', paused: next, reason: 'manual' }); } });
   $('bSpeed').addEventListener('click', function () {
     st.speed = st.speed === 1 ? 2 : (st.speed === 2 ? 4 : (st.speed === 4 ? 8 : 1)); this.textContent = st.speed + '×';
   });
@@ -3279,6 +3288,15 @@ h2 { font-size: 34px; }
 
   /* ---------- Connexion aux salons privés multijoueurs ---------- */
   var lfSocket = null, lfRoomCode = '', lfPlayerId = '', lfRoomHost = false, lfRoomPlayers = [];
+  function lfSendRoomMessage(message) {
+    if (!lfSocket || !lfRoomCode || lfSocket.readyState !== WebSocket.OPEN) return false;
+    try { lfSocket.send(JSON.stringify(message)); return true; } catch (e) { return false; }
+  }
+  function lfFindNetPlayer(netId) {
+    var sim = st.sim; if (!sim || !netId) return null;
+    for (var i = 1; i < sim.players.length; i++) if (sim.players[i] && sim.players[i].netId === netId) return sim.players[i];
+    return null;
+  }
   var lfServerInput = $('lfServerUrl'), lfRoomStatus = $('lfRoomStatus'), lfRoomDetails = $('lfRoomDetails');
   lfServerInput.value = load('lf.serverUrl','') || 'https://frontline-5kt1.onrender.com/';
   function lfSetRoomStatus(message, bad) {
@@ -3331,6 +3349,24 @@ h2 { font-size: 34px; }
         lfRoomPlayers = msg.players || lfRoomPlayers; lfRenderRoom();
       } else if (msg.type === 'host-left') {
         lfSetRoomStatus('L’hôte a quitté le salon.', true); lfDisconnectRoom(true);
+      } else if (msg.type === 'pause' && msg.from !== lfPlayerId && st.sim && st.phase === 'play') {
+        setPaused(!!msg.paused, true);
+        toast(msg.paused ? 'Partie mise en pause par un joueur.' : 'La partie reprend.');
+      } else if (msg.type === 'diplomacy-offer' && msg.from !== lfPlayerId && msg.kind === 'alliance' && msg.targetNetId === lfPlayerId && st.sim && st.phase === 'play') {
+        var proposer = lfFindNetPlayer(msg.from), localHuman = st.sim.human;
+        if (proposer && localHuman && !localHuman.allies.has(proposer.id)) {
+          lfSendRoomMessage({ type: 'pause', paused: true, reason: 'alliance-received' });
+          var already = st.sim.offers.some(function(of){ return of.kind === 'alliance' && of.from === proposer.id && of.to === localHuman.id; });
+          if (!already) st.sim.offers.push({ id: st.sim.nextOfferId++, kind: 'alliance', from: proposer.id, to: localHuman.id });
+          toast(proposer.name + ' vous propose une alliance.'); checkOffers();
+        }
+      } else if (msg.type === 'diplomacy-answer' && msg.from !== lfPlayerId && msg.targetNetId === lfPlayerId && msg.kind === 'alliance' && st.sim && st.sim.human) {
+        var responder = lfFindNetPlayer(msg.from), me = st.sim.human;
+        if (responder) {
+          if (msg.accept) { st.sim._makeAlliance(me.id, responder.id); toast(responder.name + ' accepte votre alliance.'); }
+          else toast(responder.name + ' refuse votre alliance.');
+          setPaused(false, true); updateHud(); dipSig = ''; renderDip();
+        }
       } else if (msg.type === 'action' && msg.from !== lfPlayerId && msg.action && st.sim && st.phase === 'play') {
         lfApplyRemoteAction(msg);
       } else if (msg.type === 'game-start') {
