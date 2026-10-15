@@ -1295,24 +1295,59 @@ h2 { font-size: 34px; }
     if (a.frontCursor === undefined) a.frontCursor = 0;
     a.frontCursor = a.frontCursor % front.length;
 
-    // Much stronger troop advantage = much faster visual advance.
+    // Avance progressive façon Open Front : le rapport de troupes compte,
+    // mais le point touché donne seulement un léger avantage local.
     var defenderForce = tgt ? Math.max(1, tgt.troops) : 1;
     var ratio = tgt ? a.troops / defenderForce : 3.0;
     var ratioBoost = Math.pow(Math.max(0.15, ratio), 0.72);
     var stackBoost = Math.pow(Math.max(0.25, a.troops / 1800), 0.22);
     var speed = 0.75 + 1.15 * ratioBoost * stackBoost;
+    var nearFocus = false;
+    if (a.fx >= 0) {
+      for (var fi = 0; fi < front.length; fi++) {
+        var fdx = (front[fi] % W) - a.fx, fdy = ((front[fi] / W) | 0) - a.fy;
+        if (fdx * fdx + fdy * fdy <= 25) { nearFocus = true; break; }
+      }
+    }
+    if (nearFocus) speed *= 1.10;
     speed = Math.max(0.55, Math.min(P.speedCap, speed));
     a.acc = (a.acc || 0) + speed;
     var budget = Math.floor(a.acc);
     a.acc -= budget;
 
     while (budget-- > 0 && front.length) {
+      if (a.frontCursor === undefined) a.frontCursor = 0;
       if (a.frontCursor >= front.length) a.frontCursor %= front.length;
-      // Spread the captures around the whole current front instead of following one path.
-      var stride = Math.max(1, Math.floor(front.length / Math.max(1, Math.min(8, budget + 1))));
-      var idx = (a.frontCursor + stride) % front.length;
-      var t = front[idx];
-      a.frontCursor = (idx + Math.max(1, stride)) % Math.max(1, front.length);
+      var idx = a.frontCursor % front.length;
+      var t;
+
+      // Une capture sur quatre favorise le point visé. Les autres se répartissent
+      // sur toute la frontière pour garder plusieurs axes d'expansion, sans hasard excessif.
+      var focusTurn = a.fx >= 0 && (a.gained % 4 === 0);
+      if (focusTurn) {
+        var bestScore = Infinity;
+        for (var fi2 = 0; fi2 < front.length; fi2++) {
+          var candidate = front[fi2];
+          var dxFocus = (candidate % W) - a.fx, dyFocus = ((candidate / W) | 0) - a.fy;
+          var dist2 = dxFocus * dxFocus + dyFocus * dyFocus;
+          var links = this._friendly(candidate, a.owner);
+          var score = dist2 + (4 - links) * 2.5;
+          if (score < bestScore) { bestScore = score; idx = fi2; }
+        }
+        t = front[idx];
+        a.frontCursor = (idx + Math.max(1, Math.floor(front.length / 3))) % front.length;
+      } else {
+        // Parcours tournant de la frontière : évite de capturer toujours le même couloir.
+        var scan = Math.min(7, front.length), bestLinks = -1, chosen = idx;
+        for (var si = 0; si < scan; si++) {
+          var ci = (idx + si * Math.max(1, Math.floor(front.length / scan))) % front.length;
+          var linksNow = this._friendly(front[ci], a.owner);
+          if (linksNow > bestLinks) { bestLinks = linksNow; chosen = ci; }
+        }
+        idx = chosen;
+        t = front[idx];
+        a.frontCursor = (idx + Math.max(1, Math.floor(front.length / scan))) % front.length;
+      }
 
       if (owner[t] !== a.target || terrain[t] <= 0 || this._friendly(t, a.owner) === 0) {
         front.splice(idx, 1);
