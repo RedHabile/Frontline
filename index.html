@@ -541,6 +541,8 @@ h2 { font-size: 34px; }
     samRadius: 34, samChance: 0.75,
     bomb: { atom: { cost: 900, inner: 9, outer: 16 }, hydro: { cost: 4500, inner: 18, outer: 32 }, mirv: { cost: 20000, inner: 5, outer: 10, warheads: 9, spread: 22 } }, bombSpeed: 2.2,
     shipCost: 700, shipGrow: 0.3, shipHp: 40, shipSpeed: 0.45, shipRange: 8, shipDmg: 0.35, shipShot: 35,
+    carrierCost: 2600, carrierHp: 115, carrierSpeed: 0.28, carrierRange: 15, carrierShot: 85,
+    subCost: 1450, subHp: 24, subSpeed: 0.58, subRange: 6, subDmg: 1.05, subShot: 22,
     bhp: { city: 8, factory: 6, port: 8, def: 6, silo: 10, sam: 6, airport: 8 },
     raidCost: 250, raidDmg: 5, raidSpeed: 1.6, raidRange: 130, raidSam: 0.45, vGold: 1, vTroop: 0.15, vTile: 5, winShare: 0.8,
     boatSpeed: 0.8, maxBoats: 3, focusDist: 0.5, fillW: 1.7, focusShare: 0.32,
@@ -792,6 +794,8 @@ h2 { font-size: 34px; }
   Sim.prototype._shipCount = function (pid) { var n = 0; for (var k = 0; k < this.ships.length; k++) if (this.ships[k].owner === pid) n++; return n; };
   Sim.prototype.cost = function (p, type) {
     if (type === 'ship') return Math.round(P.shipCost * (1 + P.shipGrow * this._shipCount(p.id)));
+    if (type === 'carrier') return P.carrierCost;
+    if (type === 'sub') return P.subCost;
     if (P.bomb[type]) return P.bomb[type].cost;
     return Math.round(P.cost[type] * (1 + P.grow[type] * p.count[type]));
   };
@@ -931,20 +935,25 @@ h2 { font-size: 34px; }
     }
     return best;
   };
-  Sim.prototype.buildShip = function (pid) {
+  Sim.prototype.buildShip = function (pid, vesselType) {
+    vesselType = vesselType || 'ship';
+    if (['ship', 'carrier', 'sub'].indexOf(vesselType) < 0) vesselType = 'ship';
     var p = this.players[pid];
     if (!p || !p.alive || !p.spawned) return { ok: false, reason: 'invalid' };
     if (!tl(p, 'naval')) return { ok: false, reason: 'tech', tech: 'naval' };
     if (p.count.port < 1) return { ok: false, reason: 'port' };
-    var c = this.cost(p, 'ship'); if (p.gold < c) return { ok: false, reason: 'gold' };
+    var c = this.cost(p, vesselType); if (p.gold < c) return { ok: false, reason: 'gold' };
+    var owned = 0; for (k = 0; k < this.ships.length; k++) if (this.ships[k].owner === pid && this.ships[k].type === vesselType) owned++;
+    var cap = vesselType === 'carrier' ? 2 : (vesselType === 'sub' ? 4 : 6);
+    if (owned >= cap) return { ok: false, reason: 'boats' };
     var ports = [], k;
     for (k = 0; k < this.buildings.length; k++) if (this.buildings[k].type === 'port' && this.buildings[k].owner === pid) ports.push(this.buildings[k]);
     var port = ports[(this.rng() * ports.length) | 0], sea = this._seaNear(port.tile);
     if (sea < 0) return { ok: false, reason: 'sea' };
     p.gold -= c;
-    var s = { id: this.nextBid++, owner: pid, x: (sea % W) + 0.5, y: ((sea / W) | 0) + 0.5, hp: P.shipHp, home: port.tile, tx: -1, ty: -1, think: 0, shot: 0, ang: 0, path: null, pi: 0, gkey: '', replan: 0, firing: null };
+    var s = { id: this.nextBid++, type: vesselType, owner: pid, x: (sea % W) + 0.5, y: ((sea / W) | 0) + 0.5, hp: vesselType === 'carrier' ? P.carrierHp : (vesselType === 'sub' ? P.subHp : P.shipHp), home: port.tile, tx: -1, ty: -1, think: 0, shot: 0, ang: 0, path: null, pi: 0, gkey: '', replan: 0, firing: null };
     this.ships.push(s);
-    this.events.push({ type: 'ship', owner: pid });
+    this.events.push({ type: 'ship', owner: pid, vessel: vesselType });
     return { ok: true, ship: s };
   };
   /* Chemin maritime (parcours en largeur) jusqu'à une case d'eau à portée du but */
@@ -1008,37 +1017,47 @@ h2 { font-size: 34px; }
       }
       var gx = s.tx, gy = s.ty;
       if (gx < 0) { gx = (s.home % W) + 0.5; gy = ((s.home / W) | 0) + 0.5; }
+      var vesselSpeed = s.type === 'carrier' ? P.carrierSpeed : (s.type === 'sub' ? P.subSpeed : P.shipSpeed);
+      if (s.type === 'ship') { for (k = 0; k < this.ships.length; k++) { var cv = this.ships[k]; if (cv.type === 'carrier' && cv.owner === s.owner && (cv.x-s.x)*(cv.x-s.x)+(cv.y-s.y)*(cv.y-s.y) < 18*18) { vesselRange += 2; break; } } }
+      var vesselRange = s.type === 'carrier' ? P.carrierRange : (s.type === 'sub' ? P.subRange : P.shipRange);
+      var vesselDmg = s.type === 'sub' ? P.subDmg : P.shipDmg;
+      var vesselShot = s.type === 'carrier' ? P.carrierShot : (s.type === 'sub' ? P.subShot : P.shipShot);
       var key = Math.round(gx / 3) + ',' + Math.round(gy / 3);
       if (s.gkey !== key || (this.tick >= s.replan && (!s.path || s.pi >= s.path.length))) {
         s.gkey = key; s.replan = this.tick + 45; s.path = this._shipPath(s, gx, gy); s.pi = 0;
       }
       if (s.path && s.pi < s.path.length) {
         var wp = s.path[s.pi], wx = (wp % W) + 0.5 - s.x, wy = ((wp / W) | 0) + 0.5 - s.y, wd = Math.sqrt(wx * wx + wy * wy);
-        if (wd < P.shipSpeed * 1.2) s.pi++;
-        else { s.x += wx / wd * P.shipSpeed; s.y += wy / wd * P.shipSpeed; s.ang = Math.atan2(wy, wx); }
+        if (wd < vesselSpeed * 1.2) s.pi++;
+        else { s.x += wx / wd * vesselSpeed; s.y += wy / wd * vesselSpeed; s.ang = Math.atan2(wy, wx); }
       }
       // combat : navire adverse le plus proche, sinon bâtiment côtier
-      var foe = null, fd = P.shipRange * P.shipRange;
+      var foe = null, fd = vesselRange * vesselRange;
       for (k = 0; k < this.ships.length; k++) {
         o = this.ships[k]; if (o.owner === s.owner || this.allied(s.owner, o.owner)) continue;
         var ex = o.x - s.x, ey = o.y - s.y, ed = ex * ex + ey * ey;
-        if (ed <= fd) { fd = ed; foe = o; }
+        if (ed <= fd && (s.type !== 'carrier' || o.type !== 'carrier')) { fd = ed; foe = o; }
       }
-      if (foe) { foe.hp -= P.shipDmg * (1 + 0.35 * tl(this.players[s.owner], 'dNaval')); s.firing = foe; }
+      if (foe) {
+        var damage = vesselDmg * (1 + 0.35 * tl(this.players[s.owner], 'dNaval'));
+        if (s.type === 'sub') damage *= 1.35;
+        if (foe.type === 'sub' && s.type !== 'sub') damage *= 0.45;
+        foe.hp -= damage; s.firing = foe;
+      }
       else {
         s.firing = null;
         if (this.tick >= s.shot) {
-          var tb = null, tdd = P.shipRange * P.shipRange;
+          var tb = null, tdd = vesselRange * vesselRange;
           for (k = 0; k < this.buildings.length; k++) {
             var b2 = this.buildings[k]; if (b2.owner === s.owner || this.allied(s.owner, b2.owner)) continue;
             var bx = (b2.tile % W) + 0.5 - s.x, by = ((b2.tile / W) | 0) + 0.5 - s.y, bdd = bx * bx + by * by;
             if (bdd <= tdd) { tdd = bdd; tb = b2; }
           }
           if (tb) {
-            s.shot = this.tick + P.shipShot;
+            s.shot = this.tick + vesselShot;
             var vic = this.players[tb.owner];
             if (vic) vic.troops = Math.max(0, vic.troops - 25);
-            tb.hp = (tb.hp === undefined ? P.bhp[tb.type] : tb.hp) - (1 + 0.35 * tl(this.players[s.owner], 'dNaval'));
+            tb.hp = (tb.hp === undefined ? P.bhp[tb.type] : tb.hp) - (s.type === 'carrier' ? 2.5 : 1) * (1 + 0.35 * tl(this.players[s.owner], 'dNaval'));
             this.events.push({ type: 'shell', x: s.x, y: s.y, tx: (tb.tile % W) + 0.5, ty: ((tb.tile / W) | 0) + 0.5 });
             if (tb.hp <= 0) {
               this.events.push({ type: 'boom', x: tb.tile % W, y: (tb.tile / W) | 0, inner: 2, outer: 4, owner: s.owner, kind: 'ship' });
@@ -2052,6 +2071,8 @@ h2 { font-size: 34px; }
     { k: 'silo', kind: 'place', name: 'Silo', desc: 'Lance les bombes', svg: Art.icon('silo') },
     { k: 'sam', kind: 'place', name: 'SAM', desc: 'Intercepte bombes et avions', svg: Art.icon('sam') },
     { k: 'ship', kind: 'ship', req: 'port', name: 'Navire', desc: 'Navire de guerre', svg: Art.icon('ship') },
+    { k: 'carrier', kind: 'ship', req: 'port', name: 'Porte-avions', desc: 'Navire lourd : frappe les bâtiments à longue portée et soutient la flotte', svg: Art.icon('ship') },
+    { k: 'sub', kind: 'ship', req: 'port', name: 'Sous-marin', desc: 'Rapide, discret et redoutable contre les navires', svg: Art.icon('ship') },
     { k: 'atom', kind: 'bomb', req: 'silo', name: 'Atomique', desc: 'Rayon ' + P.bomb.atom.outer, svg: Art.icon('atom') },
     { k: 'hydro', kind: 'bomb', req: 'silo', name: 'Hydrogène', desc: 'Rayon ' + P.bomb.hydro.outer, svg: Art.icon('hydro') },
     { k: 'mirv', kind: 'bomb', req: 'silo', name: 'MIRV', desc: P.bomb.mirv.warheads + ' ogives', svg: Art.icon('mirv') },
@@ -2265,6 +2286,8 @@ h2 { font-size: 34px; }
       ctx.lineWidth = Math.max(1.3, sr * 0.24); ctx.strokeStyle = 'rgba(6,14,22,0.96)';
       ctx.beginPath(); ctx.moveTo(sr * 1.75, 0); ctx.lineTo(sr * 0.35, -sr * 0.8); ctx.lineTo(-sr * 1.35, -sr * 0.68); ctx.lineTo(-sr * 1.35, sr * 0.68); ctx.lineTo(sr * 0.35, sr * 0.8); ctx.closePath();
       ctx.fillStyle = tc; ctx.fill(); ctx.stroke();
+      if (sh.type === 'carrier') { ctx.fillStyle = '#f5f0df'; ctx.fillRect(-sr * 1.15, -sr * 0.48, sr * 2.0, sr * 0.96); ctx.fillStyle = '#303e4a'; for (var ci = 0; ci < 3; ci++) ctx.fillRect(-sr * 0.75 + ci * sr * 0.55, -sr * 0.22, sr * 0.32, sr * 0.44); }
+      else if (sh.type === 'sub') { ctx.fillStyle = '#293843'; ctx.beginPath(); ctx.ellipse(0, 0, sr * 1.45, sr * 0.43, 0, 0, 6.2832); ctx.fill(); ctx.fillStyle = '#b8c8d2'; ctx.fillRect(-sr * 0.2, -sr * 0.55, sr * 0.48, sr * 0.35); }
       ctx.fillStyle = 'rgba(241,246,250,0.94)'; ctx.beginPath(); ctx.moveTo(sr * 1.15, 0); ctx.lineTo(sr * 0.25, -sr * 0.46); ctx.lineTo(-sr * 1.0, -sr * 0.4); ctx.lineTo(-sr * 1.0, sr * 0.4); ctx.lineTo(sr * 0.25, sr * 0.46); ctx.closePath(); ctx.fill();
       if (sr >= 5) {
         ctx.strokeStyle = '#142230'; ctx.lineWidth = Math.max(1, sr * 0.14); ctx.beginPath(); ctx.moveTo(sr * 0.4, 0); ctx.lineTo(sr * 1.05, 0); ctx.stroke();
@@ -2541,9 +2564,19 @@ h2 { font-size: 34px; }
       add('ship', 'Navire', sb.svg, function () {
         if (shl) { techLock('ship')(); return; }
         if (h.count.port < 1) { toast(MSGB.port); return; }
-        var r = sim.buildShip(h.id);
-        if (r.ok) { toast('Navire de guerre mis à l’eau.'); closeRadial(); updateHud(); } else toast(MSGB[r.reason] || MSGB.invalid);
+        var r = sim.buildShip(h.id, 'ship');
+        if (r.ok) { lfBroadcastAction({ kind: 'shipBuild', vessel: 'ship' }); toast('Navire de guerre mis à l’eau.'); closeRadial(); updateHud(); } else toast(MSGB[r.reason] || MSGB.invalid);
       }, shl ? null : sc, shl || h.count.port < 1 ? 'off' : (h.gold < sc ? 'poor' : ''), null, shl);
+      ['carrier','sub'].forEach(function (vt) {
+        var vi = ITEM[vt], vc = costOf(vt), vl = techNeeded(vt);
+        add(vt, vi.name, vi.svg, function () {
+          if (vl) { techLock(vt)(); return; }
+          if (h.count.port < 1) { toast(MSGB.port); return; }
+          var vr = sim.buildShip(h.id, vt);
+          if (vr.ok) { lfBroadcastAction({ kind: 'shipBuild', vessel: vt }); toast(vi.name + ' mis à l’eau.'); closeRadial(); updateHud(); }
+          else toast(MSGB[vr.reason] || MSGB.invalid);
+        }, vl ? null : vc, vl || h.count.port < 1 ? 'off' : (h.gold < vc ? 'poor' : ''), null, vl);
+      });
       add('dip', 'Diplomatie', ICON.diplo, function () { closeRadial(); openDip(0); });
       return items;
     }
@@ -3442,6 +3475,7 @@ h2 { font-size: 34px; }
       else if (action.kind === 'build') sim.build(player.id, action.item, action.target);
       else if (action.kind === 'bomb') sim.launchBomb(player.id, action.item, action.target);
       else if (action.kind === 'raid') sim.launchRaid(player.id, action.target);
+      else if (action.kind === 'shipBuild' && ['ship','carrier','sub'].indexOf(action.vessel) >= 0) sim.buildShip(player.id, action.vessel);
     } catch (e) { console.warn('Action réseau ignorée', e); }
   }
 
