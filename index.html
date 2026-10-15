@@ -3096,7 +3096,9 @@ h2 { font-size: 34px; }
       if (r.ok && r.done) toast(curOffer.kind === 'alliance' ? 'Alliance conclue avec ' + q.name + '.' : 'Échange conclu avec ' + q.name + '.');
       else toast('Vous n’avez plus les ressources nécessaires.');
     }
-    closeOffer(); updateHud();
+    closeOffer();
+    if (lfSocket && lfRoomCode) setPaused(false, true);
+    updateHud();
   }
   function checkOffers() {
     var sim = st.sim, h = sim && sim.human; if (!h || st.phase !== 'play') return;
