@@ -41,12 +41,35 @@ double_sender = state_block + "\n" + state_block
 if double_sender in s:
     s = s.replace(double_sender, state_block, 1)
     changes.append("deduplicate state sender")
-
 s = s.replace("lfSyncSendAt = 0, lfStateSendAt = 0, lfStateSendAt = 0,", "lfSyncSendAt = 0, lfStateSendAt = 0,")
+
+# Small visual logistics links between every factory and its nearest city/base of the same owner.
+road_marker = "    var br = Math.max(cw < 700 ? 3.9 : 4.9, z * 1.15);\n    for (i = 0; i < sim.buildings.length; i++) {"
+road_code = """    var br = Math.max(cw < 700 ? 3.9 : 4.9, z * 1.15);
+    if (z >= 2.2 && sim.buildings.length > 1) {
+      var citiesByOwner = Object.create(null);
+      for (i = 0; i < sim.buildings.length; i++) {
+        var cb = sim.buildings[i];
+        if (cb.type === 'city') (citiesByOwner[cb.owner] || (citiesByOwner[cb.owner] = [])).push(cb);
+      }
+      ctx.save(); ctx.lineWidth = Math.max(0.7, Math.min(1.5, z * 0.10)); ctx.setLineDash([Math.max(2, z * 0.7), Math.max(2, z * 1.2)]);
+      for (i = 0; i < sim.buildings.length; i++) {
+        var fb = sim.buildings[i]; if (fb.type !== 'factory') continue;
+        var arr = citiesByOwner[fb.owner]; if (!arr || !arr.length) continue;
+        var fx0 = fb.tile % W, fy0 = (fb.tile / W) | 0, near = arr[0], nd = Infinity;
+        for (var ri = 0; ri < arr.length; ri++) { var cb2 = arr[ri], cx2 = cb2.tile % W, cy2 = (cb2.tile / W) | 0, dd = (cx2-fx0)*(cx2-fx0) + (cy2-fy0)*(cy2-fy0); if (dd < nd) { nd = dd; near = cb2; } }
+        var fxp = (fx0 + 0.5) * z + dx, fyp = (fy0 + 0.5) * z + dy, txp = ((near.tile % W) + 0.5) * z + dx, typ = (((near.tile / W) | 0) + 0.5) * z + dy;
+        var fp = pl[fb.owner]; ctx.strokeStyle = fp ? 'rgba(' + fp.color.join(',') + ',0.34)' : 'rgba(255,255,255,0.22)';
+        ctx.beginPath(); ctx.moveTo(fxp, fyp); ctx.lineTo(txp, typ); ctx.stroke();
+      }
+      ctx.restore();
+    }
+    for (i = 0; i < sim.buildings.length; i++) {"""
+rep(road_marker, road_code, "add factory-city logistics links")
+
 if "function lfApplyNetState(msg)" not in s:
     raise SystemExit("sync function missing")
 
-# Validate every inline JavaScript block before allowing the workflow to commit it.
 scripts = re.findall(r"<script[^>]*>([\\s\\S]*?)</script>", s, re.I)
 for idx, js in enumerate(scripts):
     with tempfile.NamedTemporaryFile('w', suffix='.js', delete=False) as f:
