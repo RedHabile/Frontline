@@ -201,8 +201,8 @@ h2 { font-size: 34px; }
 .lede { margin: 8px 0 18px; color: var(--muted); font-size: 15px; text-wrap: pretty; }
 .field { display: grid; gap: 6px; margin-bottom: 14px; }
 .field input[type="text"] { width: 100%; min-width: 0; padding: 9px 10px; background: var(--raise); border: 1px solid var(--line); border-radius: 4px; -webkit-user-select: text; user-select: text; }
-.swatches { display: flex; gap: 8px; }
-.sw { width: 34px; height: 34px; padding: 0; border-radius: 4px; border: 2px solid transparent; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35); }
+.swatches { display: flex; flex-wrap: wrap; gap: 7px; max-height: 112px; overflow-y: auto; padding: 2px; }
+.sw { flex: 0 0 27px; width: 27px; height: 27px; padding: 0; border-radius: 4px; border: 2px solid transparent; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35); }
 .sw[aria-pressed="true"] { border-color: #fff; }
 .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 #seg { grid-template-columns: repeat(4, 1fr); }
@@ -349,7 +349,15 @@ h2 { font-size: 34px; }
       </div>
       <span id="sizHint" class="muted" style="font-size:12px"></span>
     </div>
-    <div class="field"><span class="lbl">Carte</span><div class="mapline"><span id="seedLbl" class="mono">n° 0</span><button id="bMap" type="button" class="ghost">Autre carte</button></div></div>
+    <div class="field"><span class="lbl">Type de carte</span>
+      <div id="mapTypes" class="seg" role="group" aria-label="Type de carte">
+        <button type="button" data-map="random" aria-pressed="true">Aléatoire</button>
+        <button type="button" data-map="world" aria-pressed="false">Monde</button>
+        <button type="button" data-map="pangea" aria-pressed="false">Pangée</button>
+        <button type="button" data-map="archipelago" aria-pressed="false">Archipel</button>
+      </div><span id="mapTypeHint" class="muted" style="font-size:12px"></span>
+    </div>
+    <div class="field"><span class="lbl">Graine de la carte</span><div class="mapline"><span id="seedLbl" class="mono">n° 0</span><button id="bMap" type="button" class="ghost">Autre carte</button></div></div>
     <div class="field" id="lfOnlinePanel" style="border:1px solid #ffffff20;border-radius:8px;padding:12px;background:#0a172244">
       <span class="lbl">Multijoueur en ligne — salons privés</span>
       <label for="lfServerUrl" style="display:block;font-size:12px;margin:6px 0 4px">Adresse du serveur</label>
@@ -438,16 +446,31 @@ h2 { font-size: 34px; }
   }
 
   /* ---------- Génération de la carte ---------- */
-  function generateMap(seed) {
+  function generateMap(seed, mapType) {
     var elev = new Float32Array(N), i, x, y, r = mulberry32(seed ^ 0x51ed270b);
-    // plusieurs continents séparés par la mer : on sème 4 à 6 masses, plus quelques îles
-    var sc = W / 280, blobs = [], K = Math.round((4 + ((r() * 3) | 0)) * sc * sc * 0.85), tries = 0;
-    while (blobs.length < K && tries++ < 400 * sc * sc) {
-      var bx = W * (0.1 + r() * 0.8), by = H * (0.16 + r() * 0.68), ok = true;
-      for (var q = 0; q < blobs.length; q++) { var ddx = (blobs[q][0] - bx) / 280, ddy = (blobs[q][1] - by) / 160 * 1.6; if (ddx * ddx + ddy * ddy < 0.052) { ok = false; break; } }
-      if (ok) blobs.push([bx, by, 24 + r() * 26, 17 + r() * 15]);
+    var sc = W / 280, blobs = [], K = 0, tries = 0;
+    mapType = mapType || 'random';
+    if (mapType === 'world') {
+      // Silhouette simplifiée des grands continents : Amériques, Europe/Afrique, Asie et Australie.
+      [[0.19,0.29,0.105,0.19],[0.27,0.49,0.065,0.20],[0.49,0.28,0.055,0.07],[0.52,0.48,0.085,0.22],[0.68,0.30,0.19,0.17],[0.78,0.51,0.12,0.12],[0.83,0.73,0.085,0.075],[0.12,0.13,0.065,0.06],[0.40,0.13,0.055,0.055]].forEach(function(b){blobs.push([W*b[0],H*b[1],W*b[2],H*b[3]]);});
+    } else if (mapType === 'pangea') {
+      [[0.48,0.31,0.19,0.19],[0.42,0.48,0.16,0.20],[0.58,0.48,0.15,0.17],[0.53,0.66,0.10,0.13],[0.35,0.30,0.10,0.11]].forEach(function(b){blobs.push([W*b[0],H*b[1],W*b[2],H*b[3]]);});
+    } else if (mapType === 'archipelago') {
+      K = Math.round(24 * sc * sc * 0.8);
+      for (var ai=0; ai<K; ai++) blobs.push([W*(0.04+r()*0.92),H*(0.08+r()*0.84),W*(0.018+r()*0.025),H*(0.025+r()*0.035)]);
+    } else {
+      K = Math.round((4 + ((r() * 3) | 0)) * sc * sc * 0.85);
+      while (blobs.length < K && tries++ < 400 * sc * sc) {
+        var bx = W * (0.1 + r() * 0.8), by = H * (0.16 + r() * 0.68), ok = true;
+        for (var q = 0; q < blobs.length; q++) { var ddx = (blobs[q][0] - bx) / 280, ddy = (blobs[q][1] - by) / 160 * 1.6; if (ddx * ddx + ddy * ddy < 0.052) { ok = false; break; } }
+        if (ok) blobs.push([bx, by, 24 + r() * 26, 17 + r() * 15]);
+      }
+      for (var m = 0, nIsl = Math.round(5 * sc * sc); m < nIsl; m++) blobs.push([W * (0.05 + r() * 0.9), H * (0.1 + r() * 0.8), 8 + r() * 8, 6 + r() * 6]);
     }
-    for (var m = 0, nIsl = Math.round(5 * sc * sc); m < nIsl; m++) blobs.push([W * (0.05 + r() * 0.9), H * (0.1 + r() * 0.8), 8 + r() * 8, 6 + r() * 6]);
+    if (mapType === 'world' || mapType === 'pangea') {
+      // Petites îles supplémentaires, sans casser la forme générale.
+      for (var wi=0, wn=Math.round(3*sc*sc); wi<wn; wi++) blobs.push([W*(0.08+r()*0.84),H*(0.12+r()*0.76),W*(0.012+r()*0.018),H*(0.018+r()*0.025)]);
+    }
     for (y = 0; y < H; y++) {
       for (x = 0; x < W; x++) {
         var wx = fbm(x * 0.03 + 50, y * 0.03 + 50, seed + 7, 3), wy = fbm(x * 0.03 - 50, y * 0.03 + 90, seed + 13, 3);
@@ -592,7 +615,7 @@ h2 { font-size: 34px; }
   function Sim(opts) {
     setSize(opts.size || 'normal');
     this.seed = (opts.seed >>> 0) || 1;
-    var g = generateMap(this.seed);
+    var g = generateMap(this.seed, opts.mapType);
     this.terrain = g.terrain; this.dist = g.dist; this.landCount = g.landCount;
     this.owner = new Uint8Array(N);
     this.fallout = new Uint8Array(N);
@@ -608,7 +631,7 @@ h2 { font-size: 34px; }
     this.netLocalId = opts.netLocalId || '';
     if (this.netPlayers && this.netPlayers.length) {
       // Every client creates the same human slots in the same order.
-      var palette = [[0,210,255],[255,80,80],[255,205,0],[180,90,255],[70,230,115],[255,125,25]];
+      var palette = [[0,210,255],[255,80,80],[255,205,0],[180,90,255],[70,230,115],[255,125,25],[255,70,170],[80,255,220],[255,145,145],[145,190,255],[190,255,90],[255,190,80],[110,110,255],[255,100,20],[50,180,90],[210,90,255],[30,150,255],[230,230,230],[160,110,60],[255,235,120],[0,220,150],[220,70,100],[120,210,255],[200,140,255],[120,255,130],[255,120,220],[150,200,70],[70,130,180],[240,150,50],[180,180,180]];
       for (var np = 0; np < this.netPlayers.length; np++) {
         var entry = this.netPlayers[np] || {};
         var color = palette[np % palette.length];
@@ -621,15 +644,20 @@ h2 { font-size: 34px; }
     } else if (opts.human) {
       this.human = this.addPlayer(opts.human.name, opts.human.color, false);
     }
-    var nBots = opts.bots | 0, names = NAMES.slice();
+    var nBots = opts.bots | 0, names = NAMES.slice(), usedColors = Object.create(null);
+    this.players.slice(1).forEach(function(pl){ usedColors[pl.color.join(',')] = true; });
     for (var i = names.length - 1; i > 0; i--) { var j = (this.rng() * (i + 1)) | 0, t = names[i]; names[i] = names[j]; names[j] = t; }
     for (var b = 0; b < nBots; b++) {
-      var hue = (b * 137.508) % 305; if (hue > 190) hue += 55;
-      var col = hslToRgb(hue + 5, 0.62 + (b % 3) * 0.08, 0.46 + (b % 2) * 0.1);
-      if (this.human) {
-        var hc = this.human.color, dd = Math.abs(col[0] - hc[0]) + Math.abs(col[1] - hc[1]) + Math.abs(col[2] - hc[2]);
-        if (dd < 140) col = hslToRgb(hue + 40, 0.65, 0.5);
+      var hue = (b * 137.508 + 19) % 360, col, colorKey, triesColor = 0;
+      do {
+        col = hslToRgb(hue, 0.72 + (triesColor % 3) * 0.06, 0.43 + (triesColor % 2) * 0.09);
+        colorKey = col.join(','); hue = (hue + 137.508) % 360; triesColor++;
+      } while (usedColors[colorKey] && triesColor < 100);
+      // Garantie : même si une teinte retombe sur une couleur déjà utilisée, on continue jusqu'à une couleur libre.
+      while (usedColors[colorKey]) {
+        col = hslToRgb(hue, 0.85, 0.5); colorKey = col.join(','); hue = (hue + 11.7) % 360;
       }
+      usedColors[colorKey] = true;
       var p = this.addPlayer(names[b % names.length] + (b >= names.length ? ' ' + (1 + (b / names.length | 0)) : ''), col, true);
       p.level = pickLevel(opts.difficulty || 'normal', this.rng);
       p.skill = LEVELS[p.level];
@@ -2285,7 +2313,7 @@ h2 { font-size: 34px; }
   'use strict';
   var S = window.GameSim, Pt = window.GamePaint, W = S.W, H = S.H, N = S.N;
   var FONT = '"Chakra Petch", "Avenir Next", system-ui, sans-serif', MONO = '"IBM Plex Mono", ui-monospace, Menlo, monospace';
-  var COLORS = [[0, 210, 255], [255, 80, 80], [255, 205, 0], [180, 90, 255], [70, 230, 115], [255, 125, 25]];
+  var COLORS = [[0,210,255],[255,80,80],[255,205,0],[180,90,255],[70,230,115],[255,125,25],[255,70,170],[80,255,220],[255,145,145],[145,190,255],[190,255,90],[255,190,80],[110,110,255],[255,100,20],[50,180,90],[210,90,255],[30,150,255],[230,230,230],[160,110,60],[255,235,120],[0,220,150],[220,70,100],[120,210,255],[200,140,255],[120,255,130],[255,120,220],[150,200,70],[70,130,180],[240,150,50],[180,180,180]];
   var DEEP = '#0e2e54';
   var P = S.P;
   function nf(x) { return String(x).replace('.', ','); }
@@ -2354,7 +2382,7 @@ h2 { font-size: 34px; }
 
   var st = {
     phase: 'menu', sim: null, bg: null, paused: false, speed: 1, pct: 40, overDone: false, spectator: false,
-    seed: 1000 + ((Math.random() * 9000) | 0), bots: parseInt(load('lf.bots', '16'), 10) || 16, diff: load('lf.diff', 'normal'), size: load('lf.size', 'normal'),
+    seed: 1000 + ((Math.random() * 9000) | 0), bots: parseInt(load('lf.bots', '16'), 10) || 16, diff: load('lf.diff', 'normal'), size: load('lf.size', 'normal'), mapType: load('lf.mapType', 'random'),
     col: parseInt(load('lf.col', '0'), 10) || 0, focus: null, playStart: 0, hoverTile: -2, ptype: 'mouse', wars: {}, hl: null, lasso: null
   };
   var cam = { x: W / 2, y: H / 2, z: 3 }, cw = 1, ch = 1, dpr = 1, minZ = 1, maxZ = 30, dirty = false;
@@ -2662,7 +2690,7 @@ h2 { font-size: 34px; }
 
   /* ---------- Chargement de la carte et démarrage ---------- */
   function loadMap() {
-    var sim = new S.Sim({ seed: st.seed, bots: 0, size: st.size }); syncSize();
+    var sim = new S.Sim({ seed: st.seed, bots: 0, size: st.size, mapType: st.mapType }); syncSize();
     st.sim = sim; st.bg = Pt.buildBase(sim); buildFx(st.bg);
     Pt.paintAll(sim, st.bg, px); flush();
     $('seedLbl').textContent = 'n° ' + st.seed;
@@ -2681,9 +2709,9 @@ h2 { font-size: 34px; }
 
   function startGame() {
     var name = ($('nm').value.trim() || 'Joueur').slice(0, 14);
-    save('lf.name', $('nm').value.trim()); save('lf.bots', String(st.bots)); save('lf.diff', st.diff); save('lf.size', st.size); save('lf.col', String(st.col));
+    save('lf.name', $('nm').value.trim()); save('lf.bots', String(st.bots)); save('lf.diff', st.diff); save('lf.size', st.size); save('lf.mapType', st.mapType); save('lf.col', String(st.col));
     var netPlayers = lfSocket && lfRoomCode && lfRoomPlayers.length > 1 ? lfRoomPlayers : null;
-    var sim = new S.Sim({ seed: st.seed, bots: st.bots, difficulty: st.diff, size: st.size, human: { name: name, color: COLORS[st.col] }, netPlayers: netPlayers, netLocalId: lfPlayerId, track: true });
+    var sim = new S.Sim({ seed: st.seed, bots: st.bots, difficulty: st.diff, size: st.size, mapType: st.mapType, human: { name: name, color: COLORS[st.col] }, netPlayers: netPlayers, netLocalId: lfPlayerId, track: true });
     syncSize(); st.sim = sim; st.paused = false; st.speed = 1; st.overDone = false; st.spectator = false; st.wars = {}; st.hl = null; st.lasso = null; curOffer = null; tr = null; holds = {}; holding = false; closeRadial(); closeDip(); closeRes(); resSig = ''; $('bRes').textContent = 'Recherche'; $('offer').hidden = true; $('trade').hidden = true; $('lbar').hidden = true; fx.length = 0; pings.length = 0;
     $('bSpeed').textContent = '1×';
     Pt.paintAll(sim, st.bg, px); sim.changed.length = 0; flush();
@@ -3595,6 +3623,12 @@ h2 { font-size: 34px; }
       });
       $('sw').appendChild(b);
     });
+    var mapButtons = $('mapTypes').children;
+    var MAP_HINTS = { random: 'Continents et îles générés aléatoirement.', world: 'Une silhouette simplifiée des grands continents du monde.', pangea: 'Un grand supercontinent à conquérir.', archipelago: 'De nombreuses îles séparées par la mer.' };
+    if (!MAP_HINTS[st.mapType]) st.mapType = 'random';
+    function markMapType() { for (var mi = 0; mi < mapButtons.length; mi++) mapButtons[mi].setAttribute('aria-pressed', String(mapButtons[mi].dataset.map === st.mapType)); $('mapTypeHint').textContent = MAP_HINTS[st.mapType]; }
+    for (var mt = 0; mt < mapButtons.length; mt++) mapButtons[mt].addEventListener('click', function () { st.mapType = this.dataset.map; markMapType(); save('lf.mapType', st.mapType); if (st.phase === 'menu') loadMap(); });
+    markMapType();
     var segs = $('seg').children;
     function markSeg() { for (var j = 0; j < segs.length; j++) segs[j].setAttribute('aria-pressed', String(parseInt(segs[j].dataset.n, 10) === st.bots)); }
     for (var j = 0; j < segs.length; j++) segs[j].addEventListener('click', function () { st.bots = parseInt(this.dataset.n, 10); markSeg(); });
@@ -3711,6 +3745,7 @@ h2 { font-size: 34px; }
         if (Array.isArray(msg.players) && msg.players.length) lfRoomPlayers = msg.players.slice();
         if (Number.isSafeInteger(settings.seed)) st.seed = settings.seed;
         if (['normal', 'large', 'huge'].includes(settings.size)) st.size = settings.size;
+        if (['random','world','pangea','archipelago'].includes(settings.mapType)) st.mapType = settings.mapType;
         if (Number.isInteger(settings.bots)) st.bots = Math.max(0, Math.min(20, settings.bots));
         // Recrée aussi l'aperçu avec la graine commune avant de lancer la simulation.
         loadMap();
@@ -3771,7 +3806,7 @@ h2 { font-size: 34px; }
       start.addEventListener('click', function () {
         if (!lfSocket || lfSocket.readyState !== WebSocket.OPEN) return lfSetRoomStatus('Connexion perdue.',true);
         if (lfRoomPlayers.length < 2) return lfSetRoomStatus('Il faut au moins deux joueurs.',true);
-        lfSocket.send(JSON.stringify({type:'start',seed:st.seed,size:st.size,bots:Math.max(0,st.bots-lfRoomPlayers.length+1)}));
+        lfSocket.send(JSON.stringify({type:'start',seed:st.seed,size:st.size,mapType:st.mapType,bots:Math.max(0,st.bots-lfRoomPlayers.length+1)}));
         lfSetRoomStatus('Lancement envoyé : tous les joueurs recevront la même carte et les mêmes paramètres.',false);
       });
       lfRoomDetails.appendChild(start);
