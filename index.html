@@ -1420,10 +1420,26 @@ h2 { font-size: 34px; }
         idx = compact[(a.frontCursor || 0) % compact.length];
         a.frontCursor = (a.frontCursor || 0) + 1;
       } else {
-        var sectors = Math.min(16, front.length);
-        var sector = (a.frontCursor || 0) % sectors;
-        idx = Math.min(front.length - 1, Math.floor((sector + 0.5) * front.length / sectors));
-        a.frontCursor = sector + 1;
+        // Répartit l'avancée sur toute la frontière au lieu de sélectionner des secteurs
+        // de la grille (qui créaient des formes carrées). On privilégie les pixels les
+        // plus éloignés des dernières captures afin d'entretenir plusieurs points d'avance.
+        var history = a.frontHistory || (a.frontHistory = []);
+        var bestSpread = -1, spreadIdx = 0;
+        for (var si = 0; si < front.length; si++) {
+          var st = front[si], sx = st % W, sy = (st / W) | 0;
+          var nearest = Infinity;
+          for (var sh = 0; sh < history.length; sh++) {
+            var ht = history[sh], hx = ht % W, hy = (ht / W) | 0;
+            var hdx = sx - hx, hdy = sy - hy;
+            var hd2 = hdx * hdx + hdy * hdy;
+            if (hd2 < nearest) nearest = hd2;
+          }
+          // Petit départage stable pour éviter de toujours favoriser le premier pixel.
+          var spread = history.length ? nearest : ((si + (a.frontCursor || 0)) % front.length);
+          if (spread > bestSpread) { bestSpread = spread; spreadIdx = si; }
+        }
+        idx = spreadIdx;
+        a.frontCursor = (a.frontCursor || 0) + 1;
       }
 
       // Le clic garde un léger bonus, sans attirer toute l'invasion vers un seul point.
@@ -1471,6 +1487,10 @@ h2 { font-size: 34px; }
       a.troops -= atkLoss;
       if (tgt) tgt.troops = Math.max(0, tgt.troops - defLoss);
       this.setOwner(t, a.owner);
+      // Historique court : il distribue les prochaines captures le long de toute la frontière.
+      if (!a.frontHistory) a.frontHistory = [];
+      a.frontHistory.push(t);
+      if (a.frontHistory.length > 18) a.frontHistory.shift();
       a.gained++;
 
       var x = t % W, y = (t / W) | 0;
