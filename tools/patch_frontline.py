@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 p = Path('index.html')
 s = p.read_text()
@@ -12,26 +13,26 @@ def rep(old, new, desc):
         return True
     return False
 
+# Economy: deliberately slower gold generation.
 rep(
     "goldBase: 0.1, goldTile: 0.0015, startGold: 200,\n    cityTroops: 3000, factoryGold: 0.35, portGold: 0.15,",
     "goldBase: 0.055, goldTile: 0.0008, startGold: 200,\n    cityTroops: 3000, factoryGold: 0.18, portGold: 0.08,",
     "reduce gold income",
 )
-rep(
-    "this.tick = 0; this.players = [null]; this.attacks = []; this.events = []; this.changed = [];",
-    "this.tick = 0; this.players = [null]; this.attacks = []; this.events = []; this.changed = []; this.netChanged = [];",
-    "track network tile changes",
-)
-rep(
-    "if (this.track) this.changed.push(i);\n  };\n\n  Sim.prototype._friendly",
-    "if (this.track) this.changed.push(i);\n    if (this.netChanged) this.netChanged.push(i);\n  };\n\n  Sim.prototype._friendly",
-    "record authoritative tile changes",
-)
 
-marker = "  /* ---------- Connexion aux salons privés multijoueurs ---------- */"
+# Keep one network change buffer only.
+s = s.replace("this.changed = []; this.netChanged = []; this.netChanged = [];", "this.changed = []; this.netChanged = [];")
+
+# The previous attempt inserted the sync function as literal \\n characters. Remove that malformed block.
+malformed = re.compile(r"(  /\* ---------- Connexion aux salons privés multijoueurs ---------- \*/)\\n  function lfApplyNetState[\\s\\S]*?\\n  }\\n\\n  var lfSocket", re.M)
+if malformed.search(s):
+    s = malformed.sub(r"\1\n  var lfSocket", s, count=1)
+    changes.append('remove malformed sync block')
+
+# Insert a real authoritative state synchronizer immediately before the room socket variables.
 if "function lfApplyNetState" not in s:
-    insert = '''
-  function lfApplyNetState(msg) {
+    marker = "  var lfSocket = null, lfRoomCode = '', lfPlayerId = '', lfRoomHost = false, lfRoomPlayers = [];"
+    insert = '''  function lfApplyNetState(msg) {
     var sim = st.sim; if (!sim || !msg || !Array.isArray(msg.players)) return;
     if (Number.isFinite(msg.tick)) { sim.tick = msg.tick; lfHostTick = msg.tick; lfLastHostSyncAt = performance.now(); }
     if (typeof msg.paused === 'boolean') { lfHostPaused = msg.paused; if (st.paused !== msg.paused) setPaused(msg.paused, true); }
@@ -49,7 +50,7 @@ if "function lfApplyNetState" not in s:
     if (Array.isArray(msg.buildings)) {
       sim.buildings = msg.buildings.map(function(b){ return Object.assign({},b); });
       sim.bmap = new Map(); sim.buildings.forEach(function(b){ sim.bmap.set(b.tile,b); });
-      for (var id = 1; id < sim.players.length; id++) { if (sim.players[id]) { sim.players[id].defs=[]; sim.players[id].sams=[]; } }
+      for (var id = 1; id < sim.players.length; id++) if (sim.players[id]) { sim.players[id].defs=[]; sim.players[id].sams=[]; }
       sim.buildings.forEach(function(b){ var p=sim.players[b.owner]; if(p){ if(b.type==='def') p.defs.push(b.tile); if(b.type==='sam') p.sams.push(b.tile); } });
     }
     if (Array.isArray(msg.ships)) sim.ships = msg.ships.map(function(x){ return Object.assign({},x); });
@@ -62,11 +63,8 @@ if "function lfApplyNetState" not in s:
   }
 
   function lfMakeNetState(sim) {
-    var tiles = [];
-    if (sim.netChanged && sim.netChanged.length) {
-      var seen = Object.create(null);
-      for (var i=0;i<sim.netChanged.length;i++) { var t=sim.netChanged[i]; if (seen[t]) continue; seen[t]=1; tiles.push([t,sim.owner[t]]); }
-    }
+    var tiles = [], seen = Object.create(null);
+    if (sim.netChanged) for (var i=0;i<sim.netChanged.length;i++) { var t=sim.netChanged[i]; if (seen[t]) continue; seen[t]=1; tiles.push([t,sim.owner[t]]); }
     var players = [];
     for (var i=1;i<sim.players.length;i++) {
       var p=sim.players[i]; if(!p) continue;
@@ -75,24 +73,21 @@ if "function lfApplyNetState" not in s:
     return {type:'state',tick:sim.tick,paused:!!st.paused,tiles:tiles,players:players,buildings:sim.buildings.map(function(b){return Object.assign({},b);}),ships:sim.ships.map(function(x){return Object.assign({},x,{path:null,firing:null});}),boats:sim.boats.map(function(x){return Object.assign({},x,{path:Array.isArray(x.path)?x.path.slice():[]});}),bombs:sim.bombs.map(function(x){return Object.assign({},x);}),planes:sim.planes.map(function(x){return Object.assign({},x);}),nextBid:sim.nextBid};
   }
 '''
-    s = s.replace(marker, marker + insert, 1)
+    s = s.replace(marker, insert + "\n" + marker, 1)
     changes.append('add authoritative multiplayer state sync')
 
-rep(
-    "} else if (msg.type === 'sync' && msg.from !== lfPlayerId && st.sim && st.phase === 'play') {",
-    "} else if (msg.type === 'state' && msg.from !== lfPlayerId && st.sim && st.phase === 'play') {\n        lfApplyNetState(msg);\n      } else if (msg.type === 'sync' && msg.from !== lfPlayerId && st.sim && st.phase === 'play') {",
-    'apply host state snapshots',
-)
-rep(
-    "var lfHostTick = null, lfHostPaused = false, lfSyncSendAt = 0,",
-    "var lfHostTick = null, lfHostPaused = false, lfSyncSendAt = 0, lfStateSendAt = 0,",
-    'add state timer',
-)
-rep(
-    "if (lfSocket && lfRoomCode && st.phase === 'play' && lfRoomHost && ts - lfSyncSendAt > 120) {\n      lfSyncSendAt = ts;\n      lfSendRoomMessage({ type: 'sync', tick: sim ? sim.tick : 0, paused: !!st.paused, speed: st.speed });\n    }",
-    "if (lfSocket && lfRoomCode && st.phase === 'play' && lfRoomHost && ts - lfSyncSendAt > 120) {\n      lfSyncSendAt = ts;\n      lfSendRoomMessage({ type: 'sync', tick: sim ? sim.tick : 0, paused: !!st.paused, speed: st.speed });\n    }\n    if (lfSocket && lfRoomCode && st.phase === 'play' && lfRoomHost && ts - lfStateSendAt > 220) {\n      lfStateSendAt = ts;\n      if (sim) { lfSendRoomMessage(lfMakeNetState(sim)); if (sim.netChanged) sim.netChanged.length = 0; }\n    }",
-    'send authoritative state snapshots',
-)
+# Remove duplicated state handler if the earlier patch inserted it twice.
+double_handler = "} else if (msg.type === 'state' && msg.from !== lfPlayerId && st.sim && st.phase === 'play') {\n        lfApplyNetState(msg);\n      } else if (msg.type === 'state' && msg.from !== lfPlayerId && st.sim && st.phase === 'play') {\n        lfApplyNetState(msg);"
+rep(double_handler, "} else if (msg.type === 'state' && msg.from !== lfPlayerId && st.sim && st.phase === 'play') {\n        lfApplyNetState(msg);", 'deduplicate state handler')
+
+# Keep exactly one authoritative state-send block.
+state_block = "    if (lfSocket && lfRoomCode && st.phase === 'play' && lfRoomHost && ts - lfStateSendAt > 220) {\n      lfStateSendAt = ts;\n      if (sim) { lfSendRoomMessage(lfMakeNetState(sim)); if (sim.netChanged) sim.netChanged.length = 0; }\n    }"
+while s.count(state_block) > 1:
+    s = s.replace(state_block + "\n" + state_block, state_block, 1)
+    changes.append('deduplicate state sender')
+
+# Avoid duplicate timer declaration.
+s = s.replace("lfSyncSendAt = 0, lfStateSendAt = 0, lfStateSendAt = 0,", "lfSyncSendAt = 0, lfStateSendAt = 0,")
 
 if changes:
     p.write_text(s)
