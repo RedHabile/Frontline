@@ -1,21 +1,10 @@
-name: Patch Frontline economy
+name: Patch Frontline economy (disabled)
+
 on:
-  push:
-    branches: [main]
-permissions:
-  contents: write
+  workflow_dispatch:
+
 jobs:
-  patch:
+  disabled:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Patch economy and logistics
-        run: python3 tools/patch_economy.py
-      - name: Commit patched index
-        run: |
-          if git diff --quiet -- index.html; then exit 0; fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add index.html
-          git commit -m 'Add building logistics and elimination gold reward'
-          git push
+      - run: echo "Disabled: economy and logistics are patched by patch-frontline.yml"
