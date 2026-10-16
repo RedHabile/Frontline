@@ -43,124 +43,148 @@ if double_sender in s:
     changes.append("deduplicate state sender")
 s = s.replace("lfSyncSendAt = 0, lfStateSendAt = 0, lfStateSendAt = 0,", "lfSyncSendAt = 0, lfStateSendAt = 0,")
 
-# Small visual logistics links between every factory and its nearest city/base of the same owner.
+# Draw logistics connections from each factory to up to three nearby same-owner buildings.
 road_marker = "    var br = Math.max(cw < 700 ? 3.9 : 4.9, z * 1.15);\n    for (i = 0; i < sim.buildings.length; i++) {"
 road_code = """    var br = Math.max(cw < 700 ? 3.9 : 4.9, z * 1.15);
     if (z >= 2.2 && sim.buildings.length > 1) {
-      var citiesByOwner = Object.create(null);
+      var linksByOwner = Object.create(null);
       for (i = 0; i < sim.buildings.length; i++) {
-        var cb = sim.buildings[i];
-        if (cb.type === 'city') (citiesByOwner[cb.owner] || (citiesByOwner[cb.owner] = [])).push(cb);
+        var lb = sim.buildings[i];
+        if (lb.type !== 'factory') (linksByOwner[lb.owner] || (linksByOwner[lb.owner] = [])).push(lb);
       }
-      ctx.save(); ctx.lineWidth = Math.max(0.7, Math.min(1.5, z * 0.10)); ctx.setLineDash([Math.max(2, z * 0.7), Math.max(2, z * 1.2)]);
+      ctx.save();
+      ctx.lineWidth = Math.max(0.65, Math.min(1.35, z * 0.09));
+      ctx.setLineDash([Math.max(2, z * 0.65), Math.max(2, z * 1.15)]);
       for (i = 0; i < sim.buildings.length; i++) {
-        var fb = sim.buildings[i]; if (fb.type !== 'factory') continue;
-        var arr = citiesByOwner[fb.owner]; if (!arr || !arr.length) continue;
-        var fx0 = fb.tile % W, fy0 = (fb.tile / W) | 0, near = arr[0], nd = Infinity;
-        for (var ri = 0; ri < arr.length; ri++) { var cb2 = arr[ri], cx2 = cb2.tile % W, cy2 = (cb2.tile / W) | 0, dd = (cx2-fx0)*(cx2-fx0) + (cy2-fy0)*(cy2-fy0); if (dd < nd) { nd = dd; near = cb2; } }
-        var fxp = (fx0 + 0.5) * z + dx, fyp = (fy0 + 0.5) * z + dy, txp = ((near.tile % W) + 0.5) * z + dx, typ = (((near.tile / W) | 0) + 0.5) * z + dy;
-        var fp = pl[fb.owner]; ctx.strokeStyle = fp ? 'rgba(' + fp.color.join(',') + ',0.34)' : 'rgba(255,255,255,0.22)';
-        ctx.beginPath(); ctx.moveTo(fxp, fyp); ctx.lineTo(txp, typ); ctx.stroke();
+        var factory = sim.buildings[i];
+        if (factory.type !== 'factory') continue;
+        var targets = linksByOwner[factory.owner];
+        if (!targets || !targets.length) continue;
+        var fx0 = factory.tile % W, fy0 = (factory.tile / W) | 0, ranked = [];
+        for (var li = 0; li < targets.length; li++) {
+          var target = targets[li], tx0 = target.tile % W, ty0 = (target.tile / W) | 0;
+          ranked.push({ b: target, d: (tx0 - fx0) * (tx0 - fx0) + (ty0 - fy0) * (ty0 - fy0) });
+        }
+        ranked.sort(function (a, b) { return a.d - b.d; });
+        var maxLinks = Math.min(3, ranked.length);
+        for (var lk = 0; lk < maxLinks; lk++) {
+          var near = ranked[lk].b, nx = near.tile % W, ny = (near.tile / W) | 0;
+          var fp = pl[factory.owner];
+          ctx.strokeStyle = fp ? 'rgba(' + fp.color.join(',') + ',0.30)' : 'rgba(255,255,255,0.18)';
+          ctx.beginPath();
+          ctx.moveTo((fx0 + 0.5) * z + dx, (fy0 + 0.5) * z + dy);
+          ctx.lineTo((nx + 0.5) * z + dx, (ny + 0.5) * z + dy);
+          ctx.stroke();
+        }
       }
       ctx.restore();
     }
     for (i = 0; i < sim.buildings.length; i++) {"""
-rep(road_marker, road_code, "add factory-city logistics links")
+rep(road_marker, road_code, "link factories to nearby same-owner buildings")
 
-# Multiplayer hardening layer. It deliberately lives after the game code so it can
-# observe the existing socket/state functions without replacing the simulation.
-net_marker = "</body>"
-if "FrontlineNetGuard" not in s and net_marker in s:
-    net_guard = r'''<script>
-/* FrontlineNetGuard: anti-désynchronisation côté navigateur. */
+# Safe standalone elimination reward. It never alters the simulation itself; it only
+# transfers gold after an owner disappears completely from the territory array.
+if "FrontlineEliminationGold" not in s:
+    reward_marker = "</body>"
+    reward_code = r'''<script>
+/* FrontlineEliminationGold: recover the eliminated nation's remaining gold. */
 (function () {
   'use strict';
-  if (window.FrontlineNetGuard) return;
-  window.FrontlineNetGuard = true;
+  if (window.FrontlineEliminationGold) return;
+  window.FrontlineEliminationGold = true;
 
-  var lastServerSeq = 0;
-  var lastStateAt = 0;
-  var lastHeartbeatAt = 0;
-  var lastResyncAt = 0;
-  var rtt = 0;
-  var guardTimer = null;
-  var originalApply = window.lfApplyNetState;
+  var previousOwners = null;
+  var rewarded = Object.create(null);
 
-  function socketOpen() {
-    return window.lfSocket && window.lfSocket.readyState === 1 && window.lfRoomCode;
+  function getPlayer(id) {
+    try { return window.pl && window.pl[id]; } catch (e) { return null; }
   }
-  function send(msg) {
+
+  function findOwnerArray() {
     try {
-      if (typeof window.lfSendRoomMessage === 'function') window.lfSendRoomMessage(msg);
-      else if (socketOpen()) window.lfSocket.send(JSON.stringify(msg));
-    } catch (e) {}
-  }
-  function isFresh(msg) {
-    var seq = Number(msg && msg.serverSeq) || 0;
-    if (!seq) return true;
-    if (seq <= lastServerSeq && !msg.resync) return false;
-    lastServerSeq = seq;
-    return true;
-  }
-
-  function applyWrapped(msg) {
-    if (!isFresh(msg)) return;
-    lastStateAt = performance.now();
-    if (typeof originalApply === 'function') return originalApply.apply(this, arguments);
-  }
-  if (typeof originalApply === 'function') window.lfApplyNetState = applyWrapped;
-
-  function requestResync(reason) {
-    var now = performance.now();
-    if (!socketOpen() || now - lastResyncAt < 1800) return;
-    lastResyncAt = now;
-    send({ type: 'resync', reason: reason || 'state-timeout', clientSeq: Date.now() & 0x7fffffff });
-    if (typeof window.toast === 'function') window.toast('Resynchronisation multijoueur…');
+      var simObj = window.sim;
+      var width = Number(window.W), height = Number(window.H);
+      if (!simObj || !width || !height) return null;
+      var total = width * height, best = null, bestScore = -Infinity;
+      var keys = Object.keys(simObj);
+      for (var k = 0; k < keys.length; k++) {
+        var candidate = simObj[keys[k]];
+        if (!candidate || typeof candidate.length !== 'number' || candidate.length !== total) continue;
+        var sample = Math.min(total, 6000), valid = 0, distinct = Object.create(null), distinctCount = 0;
+        for (var i = 0; i < sample; i++) {
+          var n = Number(candidate[i]);
+          if (!Number.isFinite(n) || n < 0 || Math.floor(n) !== n) continue;
+          valid++;
+          if (!distinct[n]) { distinct[n] = 1; distinctCount++; }
+        }
+        var score = valid - distinctCount * 3;
+        if (valid > sample * 0.75 && distinctCount >= 2 && distinctCount < 128 && score > bestScore) {
+          best = candidate;
+          bestScore = score;
+        }
+      }
+      return best;
+    } catch (e) { return null; }
   }
 
-  function guard() {
-    if (!socketOpen()) return;
-    var now = performance.now();
-    if (now - lastHeartbeatAt >= 1000) {
-      lastHeartbeatAt = now;
-      send({ type: 'heartbeat', clientTime: Date.now() });
+  function isMultiplayerHost() {
+    return !window.lfRoomCode || !!window.lfRoomHost;
+  }
+
+  function tick() {
+    if (!isMultiplayerHost()) return;
+    var owners = findOwnerArray();
+    if (!owners) return;
+    var cur = Array.from(owners, Number);
+    if (!previousOwners) { previousOwners = cur; return; }
+
+    var lost = Object.create(null);
+    for (var i = 0; i < cur.length; i++) {
+      var oldOwner = previousOwners[i], newOwner = cur[i];
+      if (oldOwner !== newOwner) {
+        if (!lost[oldOwner]) lost[oldOwner] = Object.create(null);
+        lost[oldOwner][newOwner] = (lost[oldOwner][newOwner] || 0) + 1;
+      }
     }
-    if (window.st && window.st.phase === 'play' && !window.lfRoomHost) {
-      if (!lastStateAt) lastStateAt = now;
-      if (now - lastStateAt > 3200) requestResync('no-state');
-    }
+
+    var territory = Object.create(null);
+    for (var j = 0; j < cur.length; j++) territory[cur[j]] = (territory[cur[j]] || 0) + 1;
+
+    Object.keys(lost).forEach(function (deadKey) {
+      var deadId = Number(deadKey);
+      if (rewarded[deadId] || territory[deadId]) return;
+      var transfers = lost[deadKey], killerId = null, best = 0;
+      Object.keys(transfers).forEach(function (newKey) {
+        var newId = Number(newKey), taken = transfers[newKey];
+        if (newId !== deadId && taken > best && getPlayer(newId)) {
+          best = taken;
+          killerId = newId;
+        }
+      });
+      if (killerId === null) return;
+
+      var dead = getPlayer(deadId), killer = getPlayer(killerId);
+      if (!dead || !killer) return;
+      var gold = Math.max(0, Number(dead.gold) || 0);
+      if (gold > 0) {
+        killer.gold = (Number(killer.gold) || 0) + gold;
+        dead.gold = 0;
+        if (typeof window.toast === 'function') window.toast('Nation éliminée : +' + Math.floor(gold) + ' or récupéré');
+      }
+      rewarded[deadId] = 1;
+    });
+
+    previousOwners = cur;
   }
 
-  function start() {
-    if (guardTimer) clearInterval(guardTimer);
-    lastServerSeq = 0;
-    lastStateAt = performance.now();
-    guardTimer = setInterval(guard, 250);
-  }
-  start();
-
-  document.addEventListener('visibilitychange', function () {
-    if (!document.hidden) {
-      // A backgrounded Safari tab can be throttled. Never let that become
-      // permanent network drift: ask the authoritative host for a fresh state.
-      lastStateAt = 0;
-      requestResync('tab-visible');
-    }
-  });
-
-  window.addEventListener('online', function () { requestResync('network-online'); });
-  window.addEventListener('offline', function () {
-    if (typeof window.toast === 'function') window.toast('Connexion perdue — tentative de reconnexion…', 'danger');
-  });
-
-  window.addEventListener('beforeunload', function () {
-    try { if (window.lfSocket && window.lfSocket.readyState === 1) window.lfSocket.close(1000, 'page closing'); } catch (e) {}
-  });
+  setInterval(tick, 500);
+  tick();
 })();
 </script>
 '''
-    s = s.replace(net_marker, net_guard + net_marker, 1)
-    changes.append("add multiplayer heartbeat, stale-state rejection and automatic resync")
+    if reward_marker in s:
+        s = s.replace(reward_marker, reward_code + reward_marker, 1)
+        changes.append("transfer eliminated nation gold to the victor")
 
 if "function lfApplyNetState(msg)" not in s:
     raise SystemExit("sync function missing")
