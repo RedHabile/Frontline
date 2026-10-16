@@ -4090,4 +4090,99 @@ h2 { font-size: 34px; }
   });
 })();
 </script>
+<script>
+/* FrontlineEliminationGold: recover the eliminated nation's remaining gold. */
+(function () {
+  'use strict';
+  if (window.FrontlineEliminationGold) return;
+  window.FrontlineEliminationGold = true;
+
+  var previousOwners = null;
+  var rewarded = Object.create(null);
+
+  function getPlayer(id) {
+    try { return window.pl && window.pl[id]; } catch (e) { return null; }
+  }
+
+  function findOwnerArray() {
+    try {
+      var simObj = window.sim;
+      var width = Number(window.W), height = Number(window.H);
+      if (!simObj || !width || !height) return null;
+      var total = width * height, best = null, bestScore = -Infinity;
+      var keys = Object.keys(simObj);
+      for (var k = 0; k < keys.length; k++) {
+        var candidate = simObj[keys[k]];
+        if (!candidate || typeof candidate.length !== 'number' || candidate.length !== total) continue;
+        var sample = Math.min(total, 6000), valid = 0, distinct = Object.create(null), distinctCount = 0;
+        for (var i = 0; i < sample; i++) {
+          var n = Number(candidate[i]);
+          if (!Number.isFinite(n) || n < 0 || Math.floor(n) !== n) continue;
+          valid++;
+          if (!distinct[n]) { distinct[n] = 1; distinctCount++; }
+        }
+        var score = valid - distinctCount * 3;
+        if (valid > sample * 0.75 && distinctCount >= 2 && distinctCount < 128 && score > bestScore) {
+          best = candidate;
+          bestScore = score;
+        }
+      }
+      return best;
+    } catch (e) { return null; }
+  }
+
+  function isMultiplayerHost() {
+    return !window.lfRoomCode || !!window.lfRoomHost;
+  }
+
+  function tick() {
+    if (!isMultiplayerHost()) return;
+    var owners = findOwnerArray();
+    if (!owners) return;
+    var cur = Array.from(owners, Number);
+    if (!previousOwners) { previousOwners = cur; return; }
+
+    var lost = Object.create(null);
+    for (var i = 0; i < cur.length; i++) {
+      var oldOwner = previousOwners[i], newOwner = cur[i];
+      if (oldOwner !== newOwner) {
+        if (!lost[oldOwner]) lost[oldOwner] = Object.create(null);
+        lost[oldOwner][newOwner] = (lost[oldOwner][newOwner] || 0) + 1;
+      }
+    }
+
+    var territory = Object.create(null);
+    for (var j = 0; j < cur.length; j++) territory[cur[j]] = (territory[cur[j]] || 0) + 1;
+
+    Object.keys(lost).forEach(function (deadKey) {
+      var deadId = Number(deadKey);
+      if (rewarded[deadId] || territory[deadId]) return;
+      var transfers = lost[deadKey], killerId = null, best = 0;
+      Object.keys(transfers).forEach(function (newKey) {
+        var newId = Number(newKey), taken = transfers[newKey];
+        if (newId !== deadId && taken > best && getPlayer(newId)) {
+          best = taken;
+          killerId = newId;
+        }
+      });
+      if (killerId === null) return;
+
+      var dead = getPlayer(deadId), killer = getPlayer(killerId);
+      if (!dead || !killer) return;
+      var gold = Math.max(0, Number(dead.gold) || 0);
+      if (gold > 0) {
+        killer.gold = (Number(killer.gold) || 0) + gold;
+        dead.gold = 0;
+        if (typeof window.toast === 'function') window.toast('Nation éliminée : +' + Math.floor(gold) + ' or récupéré');
+      }
+      rewarded[deadId] = 1;
+    });
+
+    previousOwners = cur;
+  }
+
+  setInterval(tick, 500);
+  tick();
+})();
+</script>
 </body></html>
