@@ -1,0 +1,101 @@
+from pathlib import Path
+
+p = Path('index.html')
+s = p.read_text()
+changes = []
+
+def rep(old, new, desc):
+    global s
+    if old in s:
+        s = s.replace(old, new, 1)
+        changes.append(desc)
+        return True
+    return False
+
+rep(
+    "goldBase: 0.1, goldTile: 0.0015, startGold: 200,\n    cityTroops: 3000, factoryGold: 0.35, portGold: 0.15,",
+    "goldBase: 0.055, goldTile: 0.0008, startGold: 200,\n    cityTroops: 3000, factoryGold: 0.18, portGold: 0.08,",
+    "reduce gold income",
+)
+rep(
+    "this.tick = 0; this.players = [null]; this.attacks = []; this.events = []; this.changed = [];",
+    "this.tick = 0; this.players = [null]; this.attacks = []; this.events = []; this.changed = []; this.netChanged = [];",
+    "track network tile changes",
+)
+rep(
+    "if (this.track) this.changed.push(i);\n  };\n\n  Sim.prototype._friendly",
+    "if (this.track) this.changed.push(i);\n    if (this.netChanged) this.netChanged.push(i);\n  };\n\n  Sim.prototype._friendly",
+    "record authoritative tile changes",
+)
+
+marker = "  /* ---------- Connexion aux salons privés multijoueurs ---------- */"
+if "function lfApplyNetState" not in s:
+    insert = '''
+  function lfApplyNetState(msg) {
+    var sim = st.sim; if (!sim || !msg || !Array.isArray(msg.players)) return;
+    if (Number.isFinite(msg.tick)) { sim.tick = msg.tick; lfHostTick = msg.tick; lfLastHostSyncAt = performance.now(); }
+    if (typeof msg.paused === 'boolean') { lfHostPaused = msg.paused; if (st.paused !== msg.paused) setPaused(msg.paused, true); }
+    var changes = Array.isArray(msg.tiles) ? msg.tiles : [];
+    for (var i = 0; i < changes.length; i++) { var c = changes[i]; if (Array.isArray(c) && c.length >= 2 && c[0] >= 0 && c[0] < sim.owner.length) sim.setOwner(c[0], c[1] | 0); }
+    for (var pi = 0; pi < msg.players.length; pi++) {
+      var src = msg.players[pi], dst = sim.players[src.id]; if (!dst) continue;
+      ['tiles','sx','sy','peak','troops','gold','alive','spawned','spawnX','spawnY','traitor','aggr','nextThink','isolated','level'].forEach(function(k){ if (src[k] !== undefined) dst[k] = src[k]; });
+      if (src.count) dst.count = Object.assign({}, src.count);
+      if (src.tech) dst.tech = Object.assign({}, src.tech);
+      dst.research = src.research ? Object.assign({}, src.research) : null;
+      if (Array.isArray(src.allies)) dst.allies = new Set(src.allies);
+      if (src.lastHit) dst.lastHit = Object.assign({}, src.lastHit);
+    }
+    if (Array.isArray(msg.buildings)) {
+      sim.buildings = msg.buildings.map(function(b){ return Object.assign({},b); });
+      sim.bmap = new Map(); sim.buildings.forEach(function(b){ sim.bmap.set(b.tile,b); });
+      for (var id = 1; id < sim.players.length; id++) { if (sim.players[id]) { sim.players[id].defs=[]; sim.players[id].sams=[]; } }
+      sim.buildings.forEach(function(b){ var p=sim.players[b.owner]; if(p){ if(b.type==='def') p.defs.push(b.tile); if(b.type==='sam') p.sams.push(b.tile); } });
+    }
+    if (Array.isArray(msg.ships)) sim.ships = msg.ships.map(function(x){ return Object.assign({},x); });
+    if (Array.isArray(msg.boats)) sim.boats = msg.boats.map(function(x){ return Object.assign({},x, {path:Array.isArray(x.path)?x.path.slice():[]}); });
+    if (Array.isArray(msg.bombs)) sim.bombs = msg.bombs.map(function(x){ return Object.assign({},x); });
+    if (Array.isArray(msg.planes)) sim.planes = msg.planes.map(function(x){ return Object.assign({},x); });
+    if (Number.isInteger(msg.nextBid)) sim.nextBid = Math.max(sim.nextBid,msg.nextBid);
+    sim.netChanged.length = 0;
+    sim.updateLabels();
+  }
+
+  function lfMakeNetState(sim) {
+    var tiles = [];
+    if (sim.netChanged && sim.netChanged.length) {
+      var seen = Object.create(null);
+      for (var i=0;i<sim.netChanged.length;i++) { var t=sim.netChanged[i]; if (seen[t]) continue; seen[t]=1; tiles.push([t,sim.owner[t]]); }
+    }
+    var players = [];
+    for (var i=1;i<sim.players.length;i++) {
+      var p=sim.players[i]; if(!p) continue;
+      players.push({id:p.id,tiles:p.tiles,sx:p.sx,sy:p.sy,peak:p.peak,troops:p.troops,gold:p.gold,alive:p.alive,spawned:p.spawned,spawnX:p.spawnX,spawnY:p.spawnY,traitor:p.traitor,aggr:p.aggr,nextThink:p.nextThink,isolated:p.isolated,level:p.level,count:p.count,tech:p.tech,research:p.research,allies:Array.from(p.allies),lastHit:p.lastHit});
+    }
+    return {type:'state',tick:sim.tick,paused:!!st.paused,tiles:tiles,players:players,buildings:sim.buildings.map(function(b){return Object.assign({},b);}),ships:sim.ships.map(function(x){return Object.assign({},x,{path:null,firing:null});}),boats:sim.boats.map(function(x){return Object.assign({},x,{path:Array.isArray(x.path)?x.path.slice():[]});}),bombs:sim.bombs.map(function(x){return Object.assign({},x);}),planes:sim.planes.map(function(x){return Object.assign({},x);}),nextBid:sim.nextBid};
+  }
+'''
+    s = s.replace(marker, marker + insert, 1)
+    changes.append('add authoritative multiplayer state sync')
+
+rep(
+    "} else if (msg.type === 'sync' && msg.from !== lfPlayerId && st.sim && st.phase === 'play') {",
+    "} else if (msg.type === 'state' && msg.from !== lfPlayerId && st.sim && st.phase === 'play') {\n        lfApplyNetState(msg);\n      } else if (msg.type === 'sync' && msg.from !== lfPlayerId && st.sim && st.phase === 'play') {",
+    'apply host state snapshots',
+)
+rep(
+    "var lfHostTick = null, lfHostPaused = false, lfSyncSendAt = 0,",
+    "var lfHostTick = null, lfHostPaused = false, lfSyncSendAt = 0, lfStateSendAt = 0,",
+    'add state timer',
+)
+rep(
+    "if (lfSocket && lfRoomCode && st.phase === 'play' && lfRoomHost && ts - lfSyncSendAt > 120) {\n      lfSyncSendAt = ts;\n      lfSendRoomMessage({ type: 'sync', tick: sim ? sim.tick : 0, paused: !!st.paused, speed: st.speed });\n    }",
+    "if (lfSocket && lfRoomCode && st.phase === 'play' && lfRoomHost && ts - lfSyncSendAt > 120) {\n      lfSyncSendAt = ts;\n      lfSendRoomMessage({ type: 'sync', tick: sim ? sim.tick : 0, paused: !!st.paused, speed: st.speed });\n    }\n    if (lfSocket && lfRoomCode && st.phase === 'play' && lfRoomHost && ts - lfStateSendAt > 220) {\n      lfStateSendAt = ts;\n      if (sim) { lfSendRoomMessage(lfMakeNetState(sim)); if (sim.netChanged) sim.netChanged.length = 0; }\n    }",
+    'send authoritative state snapshots',
+)
+
+if changes:
+    p.write_text(s)
+    print('\n'.join(changes))
+else:
+    print('no changes needed')
