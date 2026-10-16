@@ -329,6 +329,9 @@ h2 { font-size: 34px; }
         <button type="button" data-n="16" aria-pressed="true">16</button>
         <button type="button" data-n="28" aria-pressed="false">28</button>
         <button type="button" data-n="45" aria-pressed="false">45</button>
+        <button type="button" data-n="60" aria-pressed="false">60</button>
+        <button type="button" data-n="80" aria-pressed="false">80</button>
+        <button type="button" data-n="100" aria-pressed="false">100</button>
       </div>
     </div>
     <div class="field"><span class="lbl">Difficulté des bots</span>
@@ -3788,7 +3791,7 @@ h2 { font-size: 34px; }
         if (Number.isSafeInteger(settings.seed)) st.seed = settings.seed;
         if (['normal', 'large', 'huge'].includes(settings.size)) st.size = settings.size;
         if (['random','world','pangea','archipelago'].includes(settings.mapType)) st.mapType = settings.mapType;
-        if (Number.isInteger(settings.bots)) st.bots = Math.max(0, Math.min(20, settings.bots));
+        if (Number.isInteger(settings.bots)) st.bots = Math.max(0, Math.min(100, settings.bots));
         // Recrée aussi l'aperçu avec la graine commune avant de lancer la simulation.
         loadMap();
         var sizeButtons = $('siz').children;
