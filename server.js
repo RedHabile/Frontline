@@ -86,29 +86,20 @@ wss.on('connection', (ws) => {
       const settings = {
         seed: Number.isSafeInteger(msg.seed) ? msg.seed : crypto.randomInt(1, 2147483647),
         size: ['normal', 'large', 'huge'].includes(msg.size) ? msg.size : 'normal',
-        bots: Math.max(0, Math.min(20, Number.isInteger(msg.bots) ? msg.bots : 8))
+        mapType: ['random','world','pangea','archipelago'].includes(msg.mapType) ? msg.mapType : 'random',
+        bots: Math.max(0, Math.min(100, Number.isInteger(msg.bots) ? msg.bots : 8))
       };
       broadcast(room, { type: 'game-start', settings, players: [...room.players.values()] });
       return;
     }
 
-    // Relay gameplay commands/snapshots only to members of the same private room.
+    // Relay gameplay commands and authoritative host state only to members of the same room.
     if (msg.type === 'action' || msg.type === 'snapshot' || msg.type === 'state' || msg.type === 'chat' || msg.type === 'pause' || msg.type === 'sync' || msg.type === 'diplomacy-offer' || msg.type === 'diplomacy-answer') {
       if (JSON.stringify(msg).length > 48 * 1024) return send(ws, { type: 'error', message: 'Message trop volumineux.' });
       if (msg.type === 'snapshot' || msg.type === 'state') {
         if (!ws.isHost) return send(ws, { type: 'error', message: 'Seul l’hôte peut envoyer l’état de la partie.' });
       }
       const payload = { ...msg, from: ws.playerId };
-
-      // Le client non-hôte peut avoir une horloge légèrement plus rapide que celle
-      // de l'hôte (différences de requestAnimationFrame entre appareils). On lui
-      // applique une micro-correction de cadence, invisible à l'écran, afin d'éviter
-      // que son monde ne prenne de l'avance entre deux synchronisations.
-      if (msg.type === 'sync' && ws.isHost === false) {
-        const baseSpeed = Number.isFinite(msg.speed) && msg.speed > 0 ? msg.speed : 1;
-        payload.speed = baseSpeed * 0.9975;
-      }
-
       broadcast(room, payload, ws);
       return;
     }
