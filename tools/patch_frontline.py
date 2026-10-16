@@ -67,10 +67,105 @@ road_code = """    var br = Math.max(cw < 700 ? 3.9 : 4.9, z * 1.15);
     for (i = 0; i < sim.buildings.length; i++) {"""
 rep(road_marker, road_code, "add factory-city logistics links")
 
+# Multiplayer hardening layer. It deliberately lives after the game code so it can
+# observe the existing socket/state functions without replacing the simulation.
+net_marker = "</body>"
+if "FrontlineNetGuard" not in s and net_marker in s:
+    net_guard = r'''<script>
+/* FrontlineNetGuard: anti-désynchronisation côté navigateur. */
+(function () {
+  'use strict';
+  if (window.FrontlineNetGuard) return;
+  window.FrontlineNetGuard = true;
+
+  var lastServerSeq = 0;
+  var lastStateAt = 0;
+  var lastHeartbeatAt = 0;
+  var lastResyncAt = 0;
+  var rtt = 0;
+  var guardTimer = null;
+  var originalApply = window.lfApplyNetState;
+
+  function socketOpen() {
+    return window.lfSocket && window.lfSocket.readyState === 1 && window.lfRoomCode;
+  }
+  function send(msg) {
+    try {
+      if (typeof window.lfSendRoomMessage === 'function') window.lfSendRoomMessage(msg);
+      else if (socketOpen()) window.lfSocket.send(JSON.stringify(msg));
+    } catch (e) {}
+  }
+  function isFresh(msg) {
+    var seq = Number(msg && msg.serverSeq) || 0;
+    if (!seq) return true;
+    if (seq <= lastServerSeq && !msg.resync) return false;
+    lastServerSeq = seq;
+    return true;
+  }
+
+  function applyWrapped(msg) {
+    if (!isFresh(msg)) return;
+    lastStateAt = performance.now();
+    if (typeof originalApply === 'function') return originalApply.apply(this, arguments);
+  }
+  if (typeof originalApply === 'function') window.lfApplyNetState = applyWrapped;
+
+  function requestResync(reason) {
+    var now = performance.now();
+    if (!socketOpen() || now - lastResyncAt < 1800) return;
+    lastResyncAt = now;
+    send({ type: 'resync', reason: reason || 'state-timeout', clientSeq: Date.now() & 0x7fffffff });
+    if (typeof window.toast === 'function') window.toast('Resynchronisation multijoueur…');
+  }
+
+  function guard() {
+    if (!socketOpen()) return;
+    var now = performance.now();
+    if (now - lastHeartbeatAt >= 1000) {
+      lastHeartbeatAt = now;
+      send({ type: 'heartbeat', clientTime: Date.now() });
+    }
+    if (window.st && window.st.phase === 'play' && !window.lfRoomHost) {
+      if (!lastStateAt) lastStateAt = now;
+      if (now - lastStateAt > 3200) requestResync('no-state');
+    }
+  }
+
+  function start() {
+    if (guardTimer) clearInterval(guardTimer);
+    lastServerSeq = 0;
+    lastStateAt = performance.now();
+    guardTimer = setInterval(guard, 250);
+  }
+  start();
+
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) {
+      // A backgrounded Safari tab can be throttled. Never let that become
+      // permanent network drift: ask the authoritative host for a fresh state.
+      lastStateAt = 0;
+      requestResync('tab-visible');
+    }
+  });
+
+  window.addEventListener('online', function () { requestResync('network-online'); });
+  window.addEventListener('offline', function () {
+    if (typeof window.toast === 'function') window.toast('Connexion perdue — tentative de reconnexion…', 'danger');
+  });
+
+  window.addEventListener('beforeunload', function () {
+    try { if (window.lfSocket && window.lfSocket.readyState === 1) window.lfSocket.close(1000, 'page closing'); } catch (e) {}
+  });
+})();
+</script>
+'''
+    s = s.replace(net_marker, net_guard + net_marker, 1)
+    changes.append("add multiplayer heartbeat, stale-state rejection and automatic resync")
+
 if "function lfApplyNetState(msg)" not in s:
     raise SystemExit("sync function missing")
 
-scripts = re.findall(r"<script[^>]*>([\\s\\S]*?)</script>", s, re.I)
+scripts = re.findall(r"<script[^>]*>([\s\S]*?)</script>", s, re.I)
 for idx, js in enumerate(scripts):
     with tempfile.NamedTemporaryFile('w', suffix='.js', delete=False) as f:
         f.write(js)
