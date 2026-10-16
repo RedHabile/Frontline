@@ -665,7 +665,7 @@ h2 { font-size: 34px; }
     this.owner = new Uint8Array(N);
     this.fallout = new Uint8Array(N);
     this.rng = mulberry32(this.seed ^ 0x9e3779b9);
-    this.tick = 0; this.players = [null]; this.attacks = []; this.events = []; this.changed = []; this.netChanged = []; this.netChanged = [];
+    this.tick = 0; this.players = [null]; this.attacks = []; this.events = []; this.changed = []; this.netChanged = [];
     this.track = !!opts.track; this.over = null; this.halted = false; this.started = false;
     this.human = null; this.nextAttackId = 1; this.spawns = [];
     this.buildings = []; this.bmap = new Map(); this.nextBid = 1;
@@ -3697,7 +3697,7 @@ h2 { font-size: 34px; }
 
   /* ---------- Connexion aux salons privés multijoueurs ---------- */\n  function lfApplyNetState(msg) {\n    var sim = st.sim; if (!sim || !msg || !Array.isArray(msg.players)) return;\n    if (Number.isFinite(msg.tick)) { sim.tick = msg.tick; lfHostTick = msg.tick; lfLastHostSyncAt = performance.now(); }\n    if (typeof msg.paused === 'boolean') { lfHostPaused = msg.paused; if (st.paused !== msg.paused) setPaused(msg.paused, true); }\n    var changes = Array.isArray(msg.tiles) ? msg.tiles : [];\n    for (var i = 0; i < changes.length; i++) { var c = changes[i]; if (Array.isArray(c) && c.length >= 2 && c[0] >= 0 && c[0] < sim.owner.length) sim.setOwner(c[0], c[1] | 0); }\n    for (var pi = 0; pi < msg.players.length; pi++) {\n      var src = msg.players[pi], dst = sim.players[src.id]; if (!dst) continue;\n      ['tiles','sx','sy','peak','troops','gold','alive','spawned','spawnX','spawnY','traitor','aggr','nextThink','isolated','level'].forEach(function(k){ if (src[k] !== undefined) dst[k] = src[k]; });\n      if (src.count) dst.count = Object.assign({}, src.count);\n      if (src.tech) dst.tech = Object.assign({}, src.tech);\n      dst.research = src.research ? Object.assign({}, src.research) : null;\n      if (Array.isArray(src.allies)) dst.allies = new Set(src.allies);\n      if (src.lastHit) dst.lastHit = Object.assign({}, src.lastHit);\n    }\n    if (Array.isArray(msg.buildings)) {\n      sim.buildings = msg.buildings.map(function(b){ return Object.assign({},b); });\n      sim.bmap = new Map(); sim.buildings.forEach(function(b){ sim.bmap.set(b.tile,b); });\n      for (var id = 1; id < sim.players.length; id++) { if (sim.players[id]) { sim.players[id].defs=[]; sim.players[id].sams=[]; } }\n      sim.buildings.forEach(function(b){ var p=sim.players[b.owner]; if(p){ if(b.type==='def') p.defs.push(b.tile); if(b.type==='sam') p.sams.push(b.tile); } });\n    }\n    if (Array.isArray(msg.ships)) sim.ships = msg.ships.map(function(x){ return Object.assign({},x); });\n    if (Array.isArray(msg.boats)) sim.boats = msg.boats.map(function(x){ return Object.assign({},x, {path:Array.isArray(x.path)?x.path.slice():[]}); });\n    if (Array.isArray(msg.bombs)) sim.bombs = msg.bombs.map(function(x){ return Object.assign({},x); });\n    if (Array.isArray(msg.planes)) sim.planes = msg.planes.map(function(x){ return Object.assign({},x); });\n    if (Number.isInteger(msg.nextBid)) sim.nextBid = Math.max(sim.nextBid,msg.nextBid);\n    sim.netChanged.length = 0;\n    sim.updateLabels();\n  }\n\n  function lfMakeNetState(sim) {\n    var tiles = [];\n    if (sim.netChanged && sim.netChanged.length) {\n      var seen = Object.create(null);\n      for (var i=0;i<sim.netChanged.length;i++) { var t=sim.netChanged[i]; if (seen[t]) continue; seen[t]=1; tiles.push([t,sim.owner[t]]); }\n    }\n    var players = [];\n    for (var i=1;i<sim.players.length;i++) {\n      var p=sim.players[i]; if(!p) continue;\n      players.push({id:p.id,tiles:p.tiles,sx:p.sx,sy:p.sy,peak:p.peak,troops:p.troops,gold:p.gold,alive:p.alive,spawned:p.spawned,spawnX:p.spawnX,spawnY:p.spawnY,traitor:p.traitor,aggr:p.aggr,nextThink:p.nextThink,isolated:p.isolated,level:p.level,count:p.count,tech:p.tech,research:p.research,allies:Array.from(p.allies),lastHit:p.lastHit});\n    }\n    return {type:'state',tick:sim.tick,paused:!!st.paused,tiles:tiles,players:players,buildings:sim.buildings.map(function(b){return Object.assign({},b);}),ships:sim.ships.map(function(x){return Object.assign({},x,{path:null,firing:null});}),boats:sim.boats.map(function(x){return Object.assign({},x,{path:Array.isArray(x.path)?x.path.slice():[]});}),bombs:sim.bombs.map(function(x){return Object.assign({},x);}),planes:sim.planes.map(function(x){return Object.assign({},x);}),nextBid:sim.nextBid};\n  }\n
   var lfSocket = null, lfRoomCode = '', lfPlayerId = '', lfRoomHost = false, lfRoomPlayers = [];
-  var lfHostTick = null, lfHostPaused = false, lfSyncSendAt = 0, lfStateSendAt = 0, lfStateSendAt = 0, lfPauseByVisibility = false, lfPauseWasActive = false, lfLastHostSyncAt = 0;
+  var lfHostTick = null, lfHostPaused = false, lfSyncSendAt = 0, lfStateSendAt = 0, lfPauseByVisibility = false, lfPauseWasActive = false, lfLastHostSyncAt = 0;
   function lfSendRoomMessage(message) {
     if (!lfSocket || !lfRoomCode || lfSocket.readyState !== WebSocket.OPEN) return false;
     try { lfSocket.send(JSON.stringify(message)); return true; } catch (e) { return false; }
@@ -3759,8 +3759,6 @@ h2 { font-size: 34px; }
         lfRoomPlayers = msg.players || lfRoomPlayers; lfRenderRoom();
       } else if (msg.type === 'host-left') {
         lfSetRoomStatus('L’hôte a quitté le salon.', true); lfDisconnectRoom(true);
-      } else if (msg.type === 'state' && msg.from !== lfPlayerId && st.sim && st.phase === 'play') {
-        lfApplyNetState(msg);
       } else if (msg.type === 'state' && msg.from !== lfPlayerId && st.sim && st.phase === 'play') {
         lfApplyNetState(msg);
       } else if (msg.type === 'sync' && msg.from !== lfPlayerId && st.sim && st.phase === 'play') {
@@ -3905,10 +3903,6 @@ h2 { font-size: 34px; }
     if (lfSocket && lfRoomCode && st.phase === 'play' && lfRoomHost && ts - lfSyncSendAt > 120) {
       lfSyncSendAt = ts;
       lfSendRoomMessage({ type: 'sync', tick: sim ? sim.tick : 0, paused: !!st.paused, speed: st.speed });
-    }
-    if (lfSocket && lfRoomCode && st.phase === 'play' && lfRoomHost && ts - lfStateSendAt > 220) {
-      lfStateSendAt = ts;
-      if (sim) { lfSendRoomMessage(lfMakeNetState(sim)); if (sim.netChanged) sim.netChanged.length = 0; }
     }
     if (lfSocket && lfRoomCode && st.phase === 'play' && lfRoomHost && ts - lfStateSendAt > 220) {
       lfStateSendAt = ts;
