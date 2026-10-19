@@ -654,7 +654,7 @@ h2 { font-size: 34px; }
     var r = rng();                      // 'mixed' : des nuls et des monstres dans la même partie
     return r < 0.3 ? 0 : r < 0.55 ? 1 : r < 0.8 ? 2 : 3;
   }
-  function maxTroops(p) { return P.maxBase + p.count.city * P.cityTroops * (1 + 0.25 * tl(p, 'yBase')); }
+  function maxTroops(p) { return P.maxBase + Math.round(20 * Math.pow(Math.max(0, p.tiles), 0.6)) + p.count.city * P.cityTroops * (1 + 0.25 * tl(p, 'yBase')); }
 
   /* ---------- Simulation ---------- */
   function Sim(opts) {
@@ -2039,7 +2039,7 @@ h2 { font-size: 34px; }
       p.gold += this.income(p) * (p.bot && p.skill ? p.skill.inc : 1);
       var max = maxTroops(p);
       if (p.troops < max) {
-        p.troops += ((P.growBase + p.troops * P.growTroop) * (1 - p.troops / max) * P.growMul + (max - p.troops) * P.growRoom) * (p.bot ? p.skill.grow : 1);
+        p.troops += ((P.growBase + Math.pow(Math.max(0, p.troops), 0.73) / 250) * (1 - p.troops / max) * P.growMul + (max - p.troops) * P.growRoom) * (p.bot ? p.skill.grow : 1);
         if (p.troops > max) p.troops = max;
       }
     }
