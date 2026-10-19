@@ -1464,7 +1464,7 @@ h2 { font-size: 34px; }
     var ratio = tgt ? a.troops / defenderForce : 3.0;
     var ratioBoost = Math.pow(Math.max(0.15, ratio), 0.72);
     var stackBoost = Math.pow(Math.max(0.25, a.troops / 1800), 0.22);
-    var speed = 1.15 + 1.65 * ratioBoost * stackBoost;
+    var speed = (1.15 + 1.65 * ratioBoost * stackBoost) * 1.3;
     // Les grosses armées avancent sensiblement plus vite que les petits détachements.
     speed *= Math.min(1.8, 0.85 + Math.sqrt(Math.max(0, a.troops) / 1200) * 0.22);
     var nearFocus = false;
