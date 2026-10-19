@@ -24,8 +24,8 @@ rep(
 
 # Balance: territory no longer increases troop production or troop capacity.
 rep(
-    "growBase: 1.6, growTile: 0.009, growTroop: 0.0009, maxBase: 1800, maxTile: 55, neutralCost: 8.5, defMul: 1.45, defBase: 2, defLoss: 0.3, speedDiv: 17, speedCap: 45, startTroops: 1800,",
-    "growBase: 1.25, growTile: 0, growTroop: 0.00065, maxBase: 1800, maxTile: 0, neutralCost: 8.5, defMul: 1.45, defBase: 2, defLoss: 0.3, speedDiv: 17, speedCap: 45, startTroops: 1200,",
+    "growBase: 1.6, growTile: 0.009, growTroop: 0.0009, maxBase: 1800, maxTile: 55,\n    neutralCost: 8.5, defMul: 1.45, defBase: 2, defLoss: 0.3, speedDiv: 17, speedCap: 45, startTroops: 1800,",
+    "growBase: 1.25, growTile: 0, growTroop: 0.00065, maxBase: 1800, maxTile: 0,\n    neutralCost: 8.5, defMul: 1.45, defBase: 2, defLoss: 0.3, speedDiv: 17, speedCap: 45, startTroops: 1200,",
     "reduce starting troops and remove territory-based troop growth",
 )
 rep(
