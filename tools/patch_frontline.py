@@ -21,6 +21,50 @@ rep(
     "reduce gold income",
 )
 
+
+# Balance: territory no longer increases troop production or troop capacity.
+rep(
+    "growBase: 1.6, growTile: 0.009, growTroop: 0.0009, maxBase: 1800, maxTile: 55, neutralCost: 8.5, defMul: 1.45, defBase: 2, defLoss: 0.3, speedDiv: 17, speedCap: 45, startTroops: 1800,",
+    "growBase: 1.25, growTile: 0, growTroop: 0.00065, maxBase: 1800, maxTile: 0, neutralCost: 8.5, defMul: 1.45, defBase: 2, defLoss: 0.3, speedDiv: 17, speedCap: 45, startTroops: 1200,",
+    "reduce starting troops and remove territory-based troop growth",
+)
+rep(
+    "cityTroops: 3000, factoryGold: 0.18, portGold: 0.08,",
+    "cityTroops: 4500, factoryGold: 0.18, portGold: 0.08,",
+    "increase troop capacity provided by each city",
+)
+rep(
+    "function maxTroops(p) { return P.maxBase + p.tiles * P.maxTile + p.count.city * P.cityTroops * (1 + 0.25 * tl(p, 'yBase')) ; }",
+    "function maxTroops(p) { return P.maxBase + p.count.city * P.cityTroops * (1 + 0.25 * tl(p, 'yBase')); }",
+    "remove territory from troop capacity calculation",
+)
+rep(
+    "p.troops += ((P.growBase + p.tiles * P.growTile + p.troops * P.growTroop) *",
+    "p.troops += ((P.growBase + p.troops * P.growTroop) *",
+    "remove territory-based troop generation",
+)
+# Transfer all remaining gold directly inside the real elimination function.
+elim_old = "  Sim.prototype.eliminate = function (victim, killer) {\n    victim.alive = false; victim.troops = 0; victim.label = null;"
+elim_new = """  Sim.prototype.eliminate = function (victim, killer) {
+    if (killer && killer.id !== victim.id) {
+      var recoveredGold = Math.max(0, Number(victim.gold) || 0);
+      if (recoveredGold > 0) {
+        killer.gold = (Number(killer.gold) || 0) + recoveredGold;
+        victim.gold = 0;
+        this.events.push({ type: 'goldRecovered', id: victim.id, by: killer.id, amount: recoveredGold });
+      }
+    }
+    victim.alive = false; victim.troops = 0; victim.label = null;"""
+rep(elim_old, elim_new, "transfer eliminated nation's gold to its conqueror")
+# Remove the old standalone heuristic reward script; the actual simulation now handles elimination.
+if "FrontlineEliminationGold" in s:
+    start = s.find("<script>\n/* FrontlineEliminationGold:")
+    if start >= 0:
+        end = s.find("</script>", start)
+        if end >= 0:
+            s = s[:start] + s[end + len("</script>"):]
+            changes.append("remove fragile standalone elimination reward")
+
 marker = "  /* ---------- Connexion aux salons privés multijoueurs ---------- */"
 start = s.find(marker)
 end = s.find("  var lfSocket", start + len(marker)) if start >= 0 else -1
