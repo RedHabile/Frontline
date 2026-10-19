@@ -43,6 +43,18 @@ rep(
     "p.troops += ((P.growBase + p.troops * P.growTroop) *",
     "remove territory-based troop generation",
 )
+# OpenFront-style economy: land contributes to troop capacity with diminishing returns,
+# cities add a large capacity bonus, and growth slows near the cap using a sublinear troop curve.
+rep(
+    "function maxTroops(p) { return P.maxBase + p.count.city * P.cityTroops * (1 + 0.25 * tl(p, 'yBase')); }",
+    "function maxTroops(p) { return P.maxBase + Math.round(20 * Math.pow(Math.max(0, p.tiles), 0.6)) + p.count.city * P.cityTroops * (1 + 0.25 * tl(p, 'yBase')); }",
+    "restore OpenFront-style territory-based troop capacity with diminishing returns",
+)
+rep(
+    "p.troops += ((P.growBase + p.troops * P.growTroop) * (1 - p.troops / max) * P.growMul + (max - p.troops) * P.growRoom)",
+    "p.troops += ((P.growBase + Math.pow(Math.max(0, p.troops), 0.73) / 250) * (1 - p.troops / max) * P.growMul + (max - p.troops) * P.growRoom)",
+    "use OpenFront-style sublinear troop growth that slows near maximum",
+)
 # Transfer all remaining gold directly inside the real elimination function.
 elim_old = "  Sim.prototype.eliminate = function (victim, killer) {\n    victim.alive = false; victim.troops = 0; victim.label = null;"
 elim_new = """  Sim.prototype.eliminate = function (victim, killer) {
