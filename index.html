@@ -602,7 +602,7 @@ h2 { font-size: 34px; }
     growBase: 1.6, growTile: 0.009, growTroop: 0.0009, maxBase: 1800, maxTile: 55,
     neutralCost: 8.5, defMul: 1.45, defBase: 2, defLoss: 0.3, speedDiv: 17, speedCap: 45, startTroops: 1800,
     goldBase: 0.055, goldTile: 0.0008, startGold: 200,
-    cityTroops: 3000, factoryGold: 0.18, portGold: 0.08,
+    cityTroops: 4500, factoryGold: 0.18, portGold: 0.08,
     cost: { city: 300, factory: 450, port: 350, def: 200, silo: 1200, sam: 900, airport: 800 },
     grow: { city: 0.4, factory: 0.4, port: 0.4, def: 0.4, silo: 0.25, sam: 0.25, airport: 0.3 },
     defRadius: 14, defAtk: 1.8, defDef: 0.6, minBuildDist: 3,
@@ -654,7 +654,7 @@ h2 { font-size: 34px; }
     var r = rng();                      // 'mixed' : des nuls et des monstres dans la même partie
     return r < 0.3 ? 0 : r < 0.55 ? 1 : r < 0.8 ? 2 : 3;
   }
-  function maxTroops(p) { return P.maxBase + p.tiles * P.maxTile + p.count.city * P.cityTroops * (1 + 0.25 * tl(p, 'yBase')) ; }
+  function maxTroops(p) { return P.maxBase + p.count.city * P.cityTroops * (1 + 0.25 * tl(p, 'yBase')); }
 
   /* ---------- Simulation ---------- */
   function Sim(opts) {
@@ -1413,6 +1413,14 @@ h2 { font-size: 34px; }
   };
 
   Sim.prototype.eliminate = function (victim, killer) {
+    if (killer && killer.id !== victim.id) {
+      var recoveredGold = Math.max(0, Number(victim.gold) || 0);
+      if (recoveredGold > 0) {
+        killer.gold = (Number(killer.gold) || 0) + recoveredGold;
+        victim.gold = 0;
+        this.events.push({ type: 'goldRecovered', id: victim.id, by: killer.id, amount: recoveredGold });
+      }
+    }
     victim.alive = false; victim.troops = 0; victim.label = null;
     for (var k = 0; k < this.attacks.length; k++) {
       var a = this.attacks[k];
@@ -2031,7 +2039,7 @@ h2 { font-size: 34px; }
       p.gold += this.income(p) * (p.bot && p.skill ? p.skill.inc : 1);
       var max = maxTroops(p);
       if (p.troops < max) {
-        p.troops += ((P.growBase + p.tiles * P.growTile + p.troops * P.growTroop) * (1 - p.troops / max) * P.growMul + (max - p.troops) * P.growRoom) * (p.bot ? p.skill.grow : 1);
+        p.troops += ((P.growBase + p.troops * P.growTroop) * (1 - p.troops / max) * P.growMul + (max - p.troops) * P.growRoom) * (p.bot ? p.skill.grow : 1);
         if (p.troops > max) p.troops = max;
       }
     }
@@ -4090,6 +4098,7 @@ h2 { font-size: 34px; }
   });
 })();
 </script>
+
 <script>
 /* FrontlineEliminationGold: recover the eliminated nation's remaining gold. */
 (function () {
