@@ -55,6 +55,11 @@ rep(
     "p.troops += ((P.growBase + Math.pow(Math.max(0, p.troops), 0.73) / 250) * (1 - p.troops / max) * P.growMul + (max - p.troops) * P.growRoom)",
     "use OpenFront-style sublinear troop growth that slows near maximum",
 )
+rep(
+    "var speed = 1.15 + 1.65 * ratioBoost * stackBoost;",
+    "var speed = (1.15 + 1.65 * ratioBoost * stackBoost) * 1.3;",
+    "increase invasion advance per unit by 30 percent",
+)
 # Transfer all remaining gold directly inside the real elimination function.
 elim_old = "  Sim.prototype.eliminate = function (victim, killer) {\n    victim.alive = false; victim.troops = 0; victim.label = null;"
 elim_new = """  Sim.prototype.eliminate = function (victim, killer) {
